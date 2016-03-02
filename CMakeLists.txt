@@ -36,7 +36,6 @@ set(GLEW_LIBRARY_DIR ${CMAKE_LIBRARY_PATH})
 find_package(OPENGL REQUIRED)
 find_package(GLEW)
 find_library(GLFW_LIBRARY "glfw3" HINTS ${GLFW_LIBRARY_DIR})
-find_library(JSONCPP "jsoncpp")
 
 add_definitions(
         -DTW_STATIC
@@ -46,14 +45,14 @@ add_definitions(
         -D_CRT_SECURE_NO_WARNINGS
 )
 
-set(CORE_LIBS ${GLFW_LIBRARY} ${GLUT_LIBRARY} ${GLEW_LIBRARY} ${JSONCPP} ${OPENGL_LIBRARY} )
+set(CORE_LIBS ${GLFW_LIBRARY} ${GLUT_LIBRARY} ${GLEW_LIBRARY} ${OPENGL_LIBRARY} )
 
 # OSX-specific hacks/fixes
 if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     #Link IOKit because this is where we get GL stuff for OSX
     set(COREVIDEO "-framework CoreVideo")
     set(IOKIT "-framework IOKit")
-    set(CORELIBS ${CORELIBS} ${IOKIT} ${COREVIDEO})
+    set(CORE_LIBS ${CORELIBS} ${IOKIT} ${COREVIDEO})
 endif(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
 
 # Linux specific hacks/fixes
@@ -82,11 +81,13 @@ endif()
 # Add source files you want to compile (.cpp)
 set(CORE_SRC
         src/main.cpp
+		src/jsoncpp.cpp
         src/camera/camera.cpp
         src/viewer/viewer.cpp
         src/fluidSolver/fluidSolver.cpp
         src/scene/scene.cpp
-        src/geom/geom.cpp
+        src/geom/box_container.cpp
+		src/geom/box_source.cpp
 )
 
 add_executable(Thanda ${CORE_SRC})
