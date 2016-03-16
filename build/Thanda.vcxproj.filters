@@ -1,0 +1,37 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\src\main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\src\jsoncpp.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\src\camera\camera.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\src\viewer\viewer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\src\fluidSolver\fluidSolver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\src\scene\scene.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\src\geom\box_container.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\src\geom\box_source.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{9B1F97F2-6E13-3DD3-B702-BB527DBB72F7}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

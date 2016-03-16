@@ -1,0 +1,27 @@
+﻿  Building Custom Rule C:/Users/Jian Ru/Documents/CIS563/fluidsolver/CIS563-FluidSolver/CMakeLists.txt
+  CMake does not need to re-run because C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\build\CMakeFiles\generate.stamp is up-to-date.
+cl : Command line warning D9002: ignoring unknown option '-std=c++11'
+  main.cpp
+C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\src\main.cpp(21): warning C4244: 'initializing': conversion from 'std::streamoff' to 'int', possible loss of data
+  GLM: perspective function taking degrees as a parameter is deprecated. #define GLM_FORCE_RADIANS before including GLM headers to remove this message.
+  jsoncpp.cpp
+  camera.cpp
+  GLM: perspective function taking degrees as a parameter is deprecated. #define GLM_FORCE_RADIANS before including GLM headers to remove this message.
+  GLM: rotate function taking degrees as a parameter is deprecated. #define GLM_FORCE_RADIANS before including GLM headers to remove this message.
+  viewer.cpp
+  fluidSolver.cpp
+C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\src\fluidSolver\fluidSolver.cpp(62): warning C4244: 'initializing': conversion from 'double' to 'int', possible loss of data
+  scene.cpp
+C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\src\scene\scene.cpp(59): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\src\scene\scene.cpp(72): warning C4267: '=': conversion from 'size_t' to 'int', possible loss of data
+  GLM: perspective function taking degrees as a parameter is deprecated. #define GLM_FORCE_RADIANS before including GLM headers to remove this message.
+  box_container.cpp
+  GLM: perspective function taking degrees as a parameter is deprecated. #define GLM_FORCE_RADIANS before including GLM headers to remove this message.
+  box_source.cpp
+C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\src\geom\box_source.cpp(90): warning C4267: 'argument': conversion from 'size_t' to 'GLsizei', possible loss of data
+  GLM: perspective function taking degrees as a parameter is deprecated. #define GLM_FORCE_RADIANS before including GLM headers to remove this message.
+  Generating Code...
+LINK : warning LNK4098: defaultlib 'MSVCRT' conflicts with use of other libs; use /NODEFAULTLIB:library
+LINK : warning LNK4098: defaultlib 'LIBCMT' conflicts with use of other libs; use /NODEFAULTLIB:library
+glew32s.lib(glew.obj) : warning LNK4099: PDB 'vc120.pdb' was not found with 'glew32s.lib(glew.obj)' or at 'C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\build\Debug\vc120.pdb'; linking object as if no debug info
+  Thanda.vcxproj -> C:\Users\Jian Ru\Documents\CIS563\fluidsolver\CIS563-FluidSolver\build\Debug\Thanda.exe
