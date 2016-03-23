@@ -226,6 +226,7 @@ int main()
 #endif
 
 	std::shared_ptr<FS_Scene> pScene = initializeScene();
+	pScene->grid->setup();
 	pCam = FS_Camera::createFS_Camera(WINDOW_WIDTH, WINDOW_HEIGHT);
 
 	// DEBUG

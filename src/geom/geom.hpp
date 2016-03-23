@@ -19,6 +19,14 @@ struct FS_Particle
 };
 
 
+struct FS_BBox
+{
+	float xmin, xmax;
+	float ymin, ymax;
+	float zmin, zmax;
+};
+
+
 class FS_Geometry
 {
 public:

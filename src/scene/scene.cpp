@@ -24,10 +24,20 @@ std::shared_ptr<FS_Scene> FS_Scene::createFS_Scene(std::ifstream &jsonStream)
 	float c_scaleX = newScene->sceneDesc["containerDim"]["scaleX"].asFloat();
 	float c_scaleY = newScene->sceneDesc["containerDim"]["scaleX"].asFloat();
 	float c_scaleZ = newScene->sceneDesc["containerDim"]["scaleX"].asFloat();
-	bool isOpen[6] = { false, false, false, true, false, false };
+	bool isOpen[6] = { false, false, false, false, false, false };
 	newScene->containers.push_back(
 		std::make_shared<FS_BoxContainer>(
 			glm::vec3(0.f), glm::vec3(c_scaleX, c_scaleY, c_scaleZ), isOpen));
+
+	FS_BBox bbox;
+	bbox.xmin = -c_scaleX / 2.f;
+	bbox.ymin = -c_scaleY / 2.f;
+	bbox.zmin = -c_scaleZ / 2.f;
+	bbox.xmax = c_scaleX / 2.f;
+	bbox.ymax = c_scaleY / 2.f;
+	bbox.zmax = c_scaleZ / 2.f;
+	newScene->grid = std::shared_ptr<FS_MACGrid>(new FS_MACGrid(bbox, 1.f));
+	newScene->grid->init();
 
 	// Source
 	float s_scaleX = newScene->sceneDesc["particleDim"]["boundX"].asFloat();
@@ -69,7 +79,7 @@ void FS_Scene::update()
 	info.bounds[4] = c->minZ;
 	info.bounds[5] = c->maxZ;
 	info.gravity = -9.8f; // test value
-	info.numParticles = s->baseParticles.size();
+	info.numParticles = grid->particles.size();
 	info.isOpen[0] = (int)c->isOpen[0];
 	info.isOpen[1] = (int)c->isOpen[1];
 	info.isOpen[2] = (int)c->isOpen[2];
@@ -77,21 +87,23 @@ void FS_Scene::update()
 	info.isOpen[4] = (int)c->isOpen[4];
 	info.isOpen[5] = (int)c->isOpen[5];
 
-	solver->solve(deltaTime, s->vbo, &info);
+	solver->solve(deltaTime, grid->debugVBO1, &info);
 }
 
 
 void FS_Scene::render(std::shared_ptr<FS_Camera> pCam)
 {
-	for (int i = 0; i < containers.size(); ++i)
-	{
-		containers[i]->render(pCam);
-	}
+	//for (int i = 0; i < containers.size(); ++i)
+	//{
+	//	containers[i]->render(pCam);
+	//}
 
-	for (int i = 0; i < sources.size(); ++i)
-	{
-		sources[i]->render(pCam);
-	}
+	//for (int i = 0; i < sources.size(); ++i)
+	//{
+	//	sources[i]->render(pCam);
+	//}
+
+	grid->render(pCam);
 }
 
 
@@ -106,4 +118,6 @@ void FS_Scene::cleanup()
 	{
 		sources[i]->cleanup();
 	}
+
+	grid->cleanup();
 }

@@ -1,3 +1,16 @@
+# Submission 02
+
+Min OpenGL requirement: 4.3
+Visual Studio requirement: 14 (2015) x64
+
+Updates:
+1. Grid and MACGrid classes;
+2. Construction and initialization of MAC grid;
+3. Transfer particle velocity to grid;
+4. A trilinear interpolation for PIC (not used yet. Only gravity affects particles right now);
+5. Debug rendering of the grid, particles, and velocity components.
+
+
 # Submission 01
 
 Basic viewer funtionality implemented.
