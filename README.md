@@ -1,3 +1,12 @@
+# Submission 03
+
+IMPORTANT: after generating the project using cmake and running it once to generate executable,
+please copy tbb_debug.dll into where the executable resides.
+
+1. Implemented all required features;
+2. Used parallel_for in trilinear interpolation.
+
+
 # Submission 02
 
 Min OpenGL requirement: 4.3
