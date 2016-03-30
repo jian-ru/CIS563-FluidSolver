@@ -6,14 +6,16 @@
 #include <iostream>
 
 
-FS_Grid::FS_Grid(int xcount, int ycount, int zcount)
+template <class T>
+FS_Grid<T>::FS_Grid(int xcount, int ycount, int zcount)
 	: xsize(xcount), ysize(ycount), zsize(zcount)
 {
 	resize(xcount, ycount, zcount);
 }
 
 
-void FS_Grid::resize(int xcount, int ycount, int zcount)
+template <class T>
+void FS_Grid<T>::resize(int xcount, int ycount, int zcount)
 {
 	xsize = xcount;
 	ysize = ycount;
@@ -22,13 +24,15 @@ void FS_Grid::resize(int xcount, int ycount, int zcount)
 }
 
 
-void FS_Grid::zeromem()
+template <class T>
+void FS_Grid<T>::zeromem()
 {
-	memset(&values[0], 0, values.size() * sizeof(float));
+	memset(&values[0], 0, values.size() * sizeof(T));
 }
 
 
-float &FS_Grid::operator()(int i, int j, int k)
+template <class T>
+T &FS_Grid<T>::operator()(int i, int j, int k)
 {
 	i = std::max(0, std::min(xsize - 1, i));
 	j = std::max(0, std::min(ysize - 1, j));
@@ -39,7 +43,7 @@ float &FS_Grid::operator()(int i, int j, int k)
 
 
 FS_MACGrid::FS_MACGrid(const FS_BBox &b, float csize)
-	: cellSize(csize)
+	: maxVelocity(glm::vec3(0.f)), cellSize(csize), indicatorBufferGenerated(false)
 {
 	glm::vec3 center = glm::vec3(b.xmin + b.xmax, b.ymin + b.ymax, b.zmin + b.zmax) / 2.f;
 	glm::vec3 size = glm::vec3(b.xmax - b.xmin, b.ymax - b.ymin, b.ymax - b.ymin);
@@ -63,6 +67,7 @@ FS_MACGrid::FS_MACGrid(const FS_BBox &b, float csize)
 	us.resize(xcount + 1, ycount, zcount);
 	vs.resize(xcount, ycount + 1, zcount);
 	ws.resize(xcount, ycount, zcount + 1);
+	cellTypes.resize(xcount, ycount, zcount);
 
 	rng = std::uniform_real_distribution<float>(0.f, 1.f);
 	generator = std::mt19937(std::chrono::high_resolution_clock::now().time_since_epoch().count());
@@ -71,8 +76,12 @@ FS_MACGrid::FS_MACGrid(const FS_BBox &b, float csize)
 
 void FS_MACGrid::init()
 {
-	particles.clear();
-	particles.reserve(xcount * ycount * zcount * 8);
+	particles1 = std::make_shared<std::vector<FS_Particle> >();
+	particles2 = std::make_shared<std::vector<FS_Particle> >();
+	particles1->clear();
+	particles2->clear();
+	particles1->reserve(xcount * ycount * zcount * 8);
+	particles2->resize(xcount * ycount * zcount * 8);
 
 	for (int i = 0; i < xcount; ++i)
 	{
@@ -96,11 +105,44 @@ void FS_MACGrid::init()
 
 					p.position = glm::vec3(xpos, ypos, zpos);
 					p.velocity = glm::vec3(0.f);
-					particles.push_back(p);
+					particles1->push_back(p);
 				}
 			}
 		}
 	}
+
+	particles = particles1;
+}
+
+
+void FS_MACGrid::swapActiveParticleArray()
+{
+	particles = (particles == particles1) ? particles2 : particles1;
+}
+
+
+void FS_MACGrid::saveVelocities()
+{
+	tmp_us = us;
+	tmp_vs = vs;
+	tmp_ws = ws;
+}
+
+
+void FS_MACGrid::accelerateByGravity(float deltaTime, float amount)
+{
+	for (int x = 0; x < xcount; ++x)
+	{
+		for (int y = 1; y < ycount; ++y)
+		{
+			for (int z = 0; z < zcount; ++z)
+			{
+				vs(x, y, z) += amount * deltaTime;
+			}
+		}
+	}
+
+	maxVelocity[1] += amount * deltaTime;
 }
 
 
@@ -109,14 +151,30 @@ void FS_MACGrid::transferParticleVelocityToGrid()
 	us.zeromem();
 	vs.zeromem();
 	ws.zeromem();
+	cellTypes.zeromem();
 
-	for (int h = 0; h < particles.size(); ++h)
+	FS_Grid<int> ucounts(xcount + 1, ycount, zcount);
+	ucounts.zeromem();
+	FS_Grid<int> vcounts(xcount, ycount + 1, zcount);
+	vcounts.zeromem();
+	FS_Grid<int> wcounts(xcount, ycount, zcount + 1);
+	wcounts.zeromem();
+
+	for (int h = 0; h < particles->size(); ++h)
 	{
-		FS_Particle &p = particles[h];
+		FS_Particle &p = (*particles)[h];
+
+		// update maxSpeed
+		if (p.velocity.length() > maxVelocity.length())
+		{
+			maxVelocity = p.velocity;
+		}
 
 		int x = floor((p.position.x - bounds.xmin) / cellSize);
 		int y = floor((p.position.y - bounds.ymin) / cellSize);
 		int z = floor((p.position.z - bounds.zmin) / cellSize);
+
+		cellTypes(x, y, z) = 1;
 
 		for (int i = x - 1; i <= x + 1; ++i)
 		{
@@ -132,38 +190,74 @@ void FS_MACGrid::transferParticleVelocityToGrid()
 						(cz - p.position.z) * (cz - p.position.z)));
 
 					// update u
-					if (i >= 0 && j >= 0 && k >= 0 &&
-						i < xcount + 1 && j < ycount && k < zcount)
+					if (i >= 1 && j >= 0 && k >= 0 &&
+						i < xcount && j < ycount && k < zcount)
 					{
-						us(i, j, k) = p.velocity.x * one_d;
+						us(i, j, k) += p.velocity.x * one_d;
+						++ucounts(i, j, k);
 					}
 
 					// update v
-					if (i >= 0 && j >= 0 && k >= 0 &&
-						i < xcount && j < ycount + 1 && k < zcount)
+					if (i >= 0 && j >= 1 && k >= 0 &&
+						i < xcount && j < ycount && k < zcount)
 					{
-						vs(i, j, k) = p.velocity.y * one_d;
+						vs(i, j, k) += p.velocity.y * one_d;
+						++vcounts(i, j, k);
 					}
 
 					// update w
-					if (i >= 0 && j >= 0 && k >= 0 &&
-						i < xcount && j < ycount && k < zcount + 1)
+					if (i >= 0 && j >= 0 && k >= 1 &&
+						i < xcount && j < ycount && k < zcount)
 					{
-						ws(i, j, k) = p.velocity.z * one_d;
+						ws(i, j, k) += p.velocity.z * one_d;
+						++wcounts(i, j, k);
 					}
 				}
 			}
 		}
 	}
+
+	for (int i = 0; i < us.values.size(); ++i)
+	{
+		if (ucounts.values[i] != 0)
+		{
+			us.values[i] /= static_cast<float>(ucounts.values[i]);
+		}
+	}
+
+	for (int i = 0; i < vs.values.size(); ++i)
+	{
+		if (vcounts.values[i] != 0)
+		{
+			vs.values[i] /= static_cast<float>(vcounts.values[i]);
+		}
+	}
+
+	for (int i = 0; i < ws.values.size(); ++i)
+	{
+		if (wcounts.values[i] != 0)
+		{
+			ws.values[i] /= static_cast<float>(wcounts.values[i]);
+		}
+	}
 }
 
 
-// PIC
-void FS_MACGrid::interpolateVelocity()
+// FLIP
+void FS_MACGrid::interpolateVelocityDifference()
 {
-	for (int h = 0; h < particles.size(); ++h)
-	{
-		FS_Particle &p = particles[h];
+	std::shared_ptr<std::vector<FS_Particle> > particlesRead = particles;
+	std::shared_ptr<std::vector<FS_Particle> > particlesWrite = (particles == particles1) ? particles2 : particles1;
+
+	//for (int h = 0; h < particlesWrite->size(); ++h)
+	//{
+	tbb::parallel_for(0, static_cast<int>(particlesWrite->size()), [&](int h) {
+		FS_Particle &p = (*particlesRead)[h];
+		FS_Particle &pw = (*particlesWrite)[h];
+
+		pw.position = p.position;
+		pw.velocity = p.velocity;
+
 		int x = floor((p.position.x - bounds.xmin) / cellSize);
 		int y = floor((p.position.y - bounds.ymin) / cellSize);
 		int z = floor((p.position.z - bounds.zmin) / cellSize);
@@ -171,7 +265,91 @@ void FS_MACGrid::interpolateVelocity()
 		int y1 = floor((p.position.y - bounds.ymin - 0.5f * cellSize) / cellSize);
 		int z1 = floor((p.position.z - bounds.zmin - 0.5f * cellSize) / cellSize);
 
-		p.velocity = glm::vec3(0.f);
+		// update u
+		float xstart = x * cellSize + bounds.xmin;
+		float ystart = y1 * cellSize + bounds.ymin + 0.5f * cellSize;
+		float zstart = z1 * cellSize + bounds.zmin + 0.5f * cellSize;
+		float u = (p.position.x - xstart) / cellSize;
+		float v = (p.position.y - ystart) / cellSize;
+		float w = (p.position.z - zstart) / cellSize;
+
+		float u11 = (1.f - u) * (us(x, y1, z1) - tmp_us(x, y1, z1)) +
+			u * (us(x + 1, y1, z1) - tmp_us(x + 1, y1, z1));
+		float u12 = (1.f - u) * (us(x, y1 + 1, z1) - tmp_us(x, y1 + 1, z1)) +
+			u * (us(x + 1, y1 + 1, z1) - tmp_us(x + 1, y1 + 1, z1));
+		float u13 = (1.f - u) * (us(x, y1, z1 + 1) - tmp_us(x, y1, z1 + 1)) +
+			u * (us(x + 1, y1, z1 + 1) - tmp_us(x + 1, y1, z1 + 1));
+		float u14 = (1.f - u) * (us(x, y1 + 1, z1 + 1) - tmp_us(x, y1 + 1, z1 + 1)) +
+			u * (us(x + 1, y1 + 1, z1 + 1) - tmp_us(x + 1, y1 + 1, z1 + 1));
+		float u21 = (1.f - v) * u11 + v * u12;
+		float u22 = (1.f - v) * u13 + v * u14;
+		float u31 = (1.f - w) * u21 + w * u22;
+		pw.velocity.x += u31;
+
+		// update v
+		xstart = x1 * cellSize + bounds.xmin + 0.5f * cellSize;
+		ystart = y * cellSize + bounds.ymin;
+		zstart = z1 * cellSize + bounds.zmin + 0.5f * cellSize;
+		u = (p.position.x - xstart) / cellSize;
+		v = (p.position.y - ystart) / cellSize;
+		w = (p.position.z - zstart) / cellSize;
+
+		float v11 = (1.f - v) * (vs(x1, y, z1) - tmp_vs(x1, y, z1)) +
+			v * (vs(x1, y + 1, z1) - tmp_vs(x1, y + 1, z1));
+		float v12 = (1.f - v) * (vs(x1 + 1, y, z1) - tmp_vs(x1 + 1, y, z1)) +
+			v * (vs(x1 + 1, y + 1, z1) - tmp_vs(x1 + 1, y + 1, z1));
+		float v13 = (1.f - v) * (vs(x1, y, z1 + 1) - tmp_vs(x1, y, z1 + 1)) +
+			v * (vs(x1, y + 1, z1 + 1) - tmp_vs(x1, y + 1, z1 + 1));
+		float v14 = (1.f - v) * (vs(x1 + 1, y, z1 + 1) - tmp_vs(x1 + 1, y, z1 + 1)) +
+			v * (vs(x1 + 1, y + 1, z1 + 1) - tmp_vs(x1 + 1, y + 1, z1 + 1));
+		float v21 = (1.f - u) * v11 + u * v12;
+		float v22 = (1.f - u) * v13 + u * v14;
+		float v31 = (1.f - w) * v21 + w * v22;
+		pw.velocity.y += v31;
+
+		// update v
+		xstart = x1 * cellSize + bounds.xmin + 0.5f * cellSize;
+		ystart = y * cellSize + bounds.ymin;
+		zstart = z1 * cellSize + bounds.zmin + 0.5f * cellSize;
+		u = (p.position.x - xstart) / cellSize;
+		v = (p.position.y - ystart) / cellSize;
+		w = (p.position.z - zstart) / cellSize;
+
+		float w11 = (1.f - w) * (ws(x1, y1, z) - tmp_ws(x1, y1, z)) +
+			w * (ws(x1, y1, z + 1) - tmp_ws(x1, y1, z + 1));
+		float w12 = (1.f - w) * (ws(x1 + 1, y1, z) - tmp_ws(x1 + 1, y1, z)) +
+			w * (ws(x1 + 1, y1, z + 1) - tmp_ws(x1 + 1, y1, z + 1));
+		float w13 = (1.f - w) * (ws(x1, y1 + 1, z) - tmp_ws(x1, y1 + 1, z)) +
+			w * (ws(x1, y1 + 1, z + 1) - tmp_ws(x1, y1 + 1, z + 1));
+		float w14 = (1.f - w) * (ws(x1 + 1, y1 + 1, z) - tmp_ws(x1 + 1, y1 + 1, z)) +
+			w * (ws(x1 + 1, y1 + 1, z + 1) - tmp_ws(x1 + 1, y1 + 1, z + 1));
+		float w21 = (1.f - u) * w11 + u * w12;
+		float w22 = (1.f - u) * w13 + u * w14;
+		float w31 = (1.f - v) * w21 + v * w22;
+		pw.velocity.z += w31;
+
+		pw.velocity *= 0.95f; // 95% FLIP
+	});
+	//}
+}
+
+
+// PIC
+void FS_MACGrid::interpolateVelocity()
+{
+	std::shared_ptr<std::vector<FS_Particle> > particlesWrite = (particles == particles1) ? particles2 : particles1;
+
+	//for (int h = 0; h < particlesWrite->size(); ++h)
+	//{
+	tbb::parallel_for(0, static_cast<int>(particlesWrite->size()), [&](int h) {
+		FS_Particle &p = (*particlesWrite)[h];
+
+		int x = floor((p.position.x - bounds.xmin) / cellSize);
+		int y = floor((p.position.y - bounds.ymin) / cellSize);
+		int z = floor((p.position.z - bounds.zmin) / cellSize);
+		int x1 = floor((p.position.x - bounds.xmin - 0.5f * cellSize) / cellSize);
+		int y1 = floor((p.position.y - bounds.ymin - 0.5f * cellSize) / cellSize);
+		int z1 = floor((p.position.z - bounds.zmin - 0.5f * cellSize) / cellSize);
 
 		// update u
 		float xstart = x * cellSize + bounds.xmin;
@@ -188,7 +366,7 @@ void FS_MACGrid::interpolateVelocity()
 		float u21 = (1.f - v) * u11 + v * u12;
 		float u22 = (1.f - v) * u13 + v * u14;
 		float u31 = (1.f - w) * u21 + w * u22;
-		p.velocity.x = u31;
+		p.velocity.x += 0.05f * u31; // 5% PIC
 
 		// update v
 		xstart = x1 * cellSize + bounds.xmin + 0.5f * cellSize;
@@ -205,7 +383,7 @@ void FS_MACGrid::interpolateVelocity()
 		float v21 = (1.f - u) * v11 + u * v12;
 		float v22 = (1.f - u) * v13 + u * v14;
 		float v31 = (1.f - w) * v21 + w * v22;
-		p.velocity.y = v31;
+		p.velocity.y += 0.05f * v31;
 
 		// update v
 		xstart = x1 * cellSize + bounds.xmin + 0.5f * cellSize;
@@ -222,7 +400,84 @@ void FS_MACGrid::interpolateVelocity()
 		float w21 = (1.f - u) * w11 + u * w12;
 		float w22 = (1.f - u) * w13 + u * w14;
 		float w31 = (1.f - v) * w21 + v * w22;
-		p.velocity.z = w31;
+		p.velocity.z += 0.05f * w31;
+	});
+	//}
+}
+
+
+bool FS_MACGrid::averageVelocityFromNeighbours(int i, int j, int k)
+{
+	int fluidCellCount = 0;
+	glm::vec3 extrapolatedVelocity(0.f);
+
+	for (int di = -1; di <= 1; ++di)
+	{
+		for (int dj = -1; dj <= 1; ++dj)
+		{
+			for (int dk = -1; dk <= 1; ++dk)
+			{
+				if (!di && !dj && !dk) // self
+				{
+					continue;
+				}
+
+				int ni = i + di;
+				int nj = j + dj;
+				int nk = k + dk;
+
+				if (ni < 0 || ni >= xcount || nj < 0 || nj >= ycount || nk < 0 || nk >= zcount)
+				{
+					continue; // out of bound
+				}
+
+				if (cellTypes(ni, nj, nk) != 1) // neighbour is not fluid
+				{
+					continue;
+				}
+
+				++fluidCellCount;
+				extrapolatedVelocity += glm::vec3(us(ni, nj, nk), vs(ni, nj, nk), ws(ni, nj, nk));
+			}
+		}
+	}
+
+	if (fluidCellCount == 0)
+	{
+		return false;
+	}
+
+	extrapolatedVelocity /= static_cast<float>(fluidCellCount);
+
+	if (i != 0) // not boundary
+	{
+		us(i, j, k) = extrapolatedVelocity.x;
+	}
+	if (j != 0) // not boundary
+	{
+		vs(i, j, k) = extrapolatedVelocity.y;
+	}
+	if (k != 0) // not boundary
+	{
+		ws(i, j, k) = extrapolatedVelocity.z;
+	}
+}
+
+
+void FS_MACGrid::extrapolateVelocity()
+{
+	for (int i = 0; i < xcount; ++i)
+	{
+		for (int j = 0; j < ycount; ++j)
+		{
+			for (int k = 0; k < zcount; ++k)
+			{
+				if (cellTypes(i, j, k) != 0 || !averageVelocityFromNeighbours(i, j, k)) // not air or has no fluid neighbour
+				{
+					continue;
+				}
+			}
+		}
 	}
 }
 
@@ -267,11 +522,11 @@ void FS_MACGrid::setup()
 
 		glGenBuffers(1, &debugVBO1);
 		glBindBuffer(GL_ARRAY_BUFFER, debugVBO1);
-		glBufferData(GL_ARRAY_BUFFER, particles.size() * sizeof(FS_Particle), particles.data(), GL_DYNAMIC_READ);
+		glBufferData(GL_ARRAY_BUFFER, particles->size() * sizeof(FS_Particle), particles->data(), GL_DYNAMIC_READ);
 
 		glGenBuffers(1, &debugVBO2);
 		glBindBuffer(GL_ARRAY_BUFFER, debugVBO2);
-		glBufferData(GL_ARRAY_BUFFER, particles.size() * sizeof(FS_Particle), particles.data(), GL_STATIC_DRAW);
+		glBufferData(GL_ARRAY_BUFFER, particles->size() * sizeof(FS_Particle), particles->data(), GL_STATIC_DRAW);
 
 		debugGrid.clear();
 		for (int i = 0; i < xcount; ++i)
@@ -350,13 +605,13 @@ void FS_MACGrid::render(std::shared_ptr<FS_Camera> pCam)
 	glBindVertexArray(debugVAO);
 
 	glBindBuffer(GL_COPY_READ_BUFFER, debugVBO1);
-	float *mapped = reinterpret_cast<float *>(glMapBufferRange(GL_COPY_READ_BUFFER, 0, particles.size() * sizeof(FS_Particle), GL_MAP_READ_BIT));
-	memcpy(&particles[0], mapped, particles.size() * sizeof(FS_Particle));
+	float *mapped = reinterpret_cast<float *>(glMapBufferRange(GL_COPY_READ_BUFFER, 0, particles->size() * sizeof(FS_Particle), GL_MAP_READ_BIT));
+	memcpy(&(*particles)[0], mapped, particles->size() * sizeof(FS_Particle));
 	glUnmapBuffer(GL_COPY_READ_BUFFER);
 
 	// particles
 	glBindBuffer(GL_ARRAY_BUFFER, debugVBO2);
-	glBufferSubData(GL_ARRAY_BUFFER, 0, particles.size() * sizeof(FS_Particle), particles.data());
+	glBufferSubData(GL_ARRAY_BUFFER, 0, particles->size() * sizeof(FS_Particle), particles->data());
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(FS_Particle), 0);
 
@@ -369,11 +624,12 @@ void FS_MACGrid::render(std::shared_ptr<FS_Camera> pCam)
 	glUniform3f(uniColorLoc, 0.f, 0.f, 1.f);
 
 	glPointSize(4);
-	glDrawArrays(GL_POINTS, 0, particles.size());
+	glDrawArrays(GL_POINTS, 0, particles->size());
 	glPointSize(1);
 
 	// velocity
-	transferParticleVelocityToGrid();
+	//transferParticleVelocityToGrid();
+	//saveVelocities();
 	debugVelocity.clear();
 
 	for (int i = 0; i < xcount + 1; ++i)
@@ -459,6 +715,9 @@ void FS_MACGrid::render(std::shared_ptr<FS_Camera> pCam)
 
 	glDrawArrays(GL_LINES, 0, debugGrid.size());
 
+	// indicators
+	drawCellTypeIndicators(uniColorLoc);
+
 	glBindVertexArray(0);
 }
 
@@ -470,4 +729,114 @@ void FS_MACGrid::cleanup()
 	glDeleteBuffers(1, &debugVBO3);
 	glDeleteBuffers(1, &debugVBO4);
 	glDeleteBuffers(1, &debugVAO);
+}
+
+void FS_MACGrid::updateCellTypeDebugBuffer()
+{
+	airIndicators.clear();
+	fluidIndicators.clear();
+	solidIndicators.clear();
+
+	for (int x = 0; x < xcount; ++x)
+	{
+		for (int y = 0; y < ycount; ++y)
+		{
+			for (int z = 0; z < zcount; ++z)
+			{
+				float cpx = bounds.xmin + x * cellSize + 0.5f * cellSize;
+				float cpy = bounds.ymin + y * cellSize + 0.5f * cellSize;
+				float cpz = bounds.zmin + z * cellSize + 0.5f * cellSize;
+				int ct = cellTypes(x, y, z);
+
+				if (ct == 0) // air
+				{
+					airIndicators.push_back(cpx);
+					airIndicators.push_back(cpy);
+					airIndicators.push_back(cpz);
+				}
+				else if (ct == 1) // fluid
+				{
+					fluidIndicators.push_back(cpx);
+					fluidIndicators.push_back(cpy);
+					fluidIndicators.push_back(cpz);
+				}
+				else // solid
+				{
+					solidIndicators.push_back(cpx);
+					solidIndicators.push_back(cpy);
+					solidIndicators.push_back(cpz);
+				}
+			}
+		}
+	}
+
+	if (!indicatorBufferGenerated)
+	{
+		glGenBuffers(1, &airVertexBufferName);
+
+		glGenBuffers(1, &fluidVertexBufferName);
+
+		glGenBuffers(1, &solidVertexBufferName);
+		indicatorBufferGenerated = true;
+	}
+
+	if (airIndicators.size() > 0)
+	{
+		glBindBuffer(GL_ARRAY_BUFFER, airVertexBufferName);
+		glBufferData(GL_ARRAY_BUFFER, airIndicators.size() * sizeof(float), NULL, GL_STREAM_DRAW); // orphaning
+		glBufferSubData(GL_ARRAY_BUFFER, 0, airIndicators.size() * sizeof(float), airIndicators.data());
+	}
+
+	if (fluidIndicators.size() > 0)
+	{
+		glBindBuffer(GL_ARRAY_BUFFER, fluidVertexBufferName);
+		glBufferData(GL_ARRAY_BUFFER, fluidIndicators.size() * sizeof(float), NULL, GL_STREAM_DRAW);
+		glBufferSubData(GL_ARRAY_BUFFER, 0, fluidIndicators.size() * sizeof(float), fluidIndicators.data());
+	}
+
+	if (solidIndicators.size() > 0)
+	{
+		glBindBuffer(GL_ARRAY_BUFFER, solidVertexBufferName);
+		glBufferData(GL_ARRAY_BUFFER, solidIndicators.size() * sizeof(float), NULL, GL_STREAM_DRAW);
+		glBufferSubData(GL_ARRAY_BUFFER, 0, solidIndicators.size() * sizeof(float), solidIndicators.data());
+	}
+
+	glBindBuffer(GL_ARRAY_BUFFER, 0); // unbind
+}
+
+
+void FS_MACGrid::drawCellTypeIndicators(GLint uniColorLoc)
+{
+	updateCellTypeDebugBuffer();
+
+	glPointSize(6.f);
+
+	if (airIndicators.size() > 0)
+	{
+		glBindBuffer(GL_ARRAY_BUFFER, airVertexBufferName);
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), 0);
+		glUniform3f(uniColorLoc, 1.f, 1.f, 1.f);
+		glDrawArrays(GL_POINTS, 0, airIndicators.size() / 3);
+	}
+
+	if (fluidIndicators.size() > 0)
+	{
+		glBindBuffer(GL_ARRAY_BUFFER, fluidVertexBufferName);
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), 0);
+		glUniform3f(uniColorLoc, 0.f, 1.f, 1.f);
+		glDrawArrays(GL_POINTS, 0, fluidIndicators.size() / 3);
+	}
+
+	if (solidIndicators.size() > 0)
+	{
+		glBindBuffer(GL_ARRAY_BUFFER, solidVertexBufferName);
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), 0);
+		glUniform3f(uniColorLoc, 1.f, 1.f, 0.f);
+		glDrawArrays(GL_POINTS, 0, solidIndicators.size() / 3);
+	}
+
+	glPointSize(1.f);
 }

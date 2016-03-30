@@ -20,7 +20,7 @@ void main()
 	vec3 velocity = vec3(particles.data[gid*6+3], particles.data[gid*6+4], particles.data[gid*6+5]);
 	
 	vec3 next_pos = position + deltaTime * velocity;
-	velocity += deltaTime * gravity;
+	//velocity += deltaTime * gravity;
 	
 	bool ncnx = next_pos.x > bounds[0] || isOpen[0];
 	bool ncpx = next_pos.x < bounds[1] || isOpen[1];
@@ -33,7 +33,7 @@ void main()
 	position.y = next_pos.y * float(ncny && ncpy) + bounds[2] * float(!ncny) + bounds[3] * float(!ncpy);
 	position.z = next_pos.z * float(ncnz && ncpz) + bounds[4] * float(!ncnz) + bounds[5] * float(!ncpz);
 	
-	float df = .4; // damping factor
+	float df = 1.0; // damping factor
 	
 	velocity.x = velocity.x * float(ncnx && ncpx) - df * velocity.x * float(!ncnx || !ncpx);
 	velocity.y = velocity.y * float(ncny && ncpy) - df * velocity.y * float(!ncny || !ncpy);

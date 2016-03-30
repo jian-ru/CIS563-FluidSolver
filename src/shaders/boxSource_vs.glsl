@@ -2,6 +2,8 @@
 
 layout(location = 0) in vec3 position;
 
+out vec3 frag_color;
+
 uniform mat4 MVP;
 
 void main()

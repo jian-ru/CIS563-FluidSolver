@@ -36,6 +36,7 @@ set(GLEW_LIBRARY_DIR ${CMAKE_LIBRARY_PATH})
 find_package(OPENGL REQUIRED)
 find_package(GLEW)
 find_library(GLFW_LIBRARY "glfw3" HINTS ${GLFW_LIBRARY_DIR})
+find_library(TBB_LIBRARY "tbb_debug" HINTS ${CMAKE_LIBRARY_PATH})
 
 add_definitions(
         -DTW_STATIC
@@ -45,7 +46,7 @@ add_definitions(
         -D_CRT_SECURE_NO_WARNINGS
 )
 
-set(CORE_LIBS ${GLFW_LIBRARY} ${GLUT_LIBRARY} ${GLEW_LIBRARY} ${OPENGL_LIBRARY} )
+set(CORE_LIBS ${GLFW_LIBRARY} ${GLUT_LIBRARY} ${GLEW_LIBRARY} ${OPENGL_LIBRARY} ${TBB_LIBRARY} )
 
 # OSX-specific hacks/fixes
 if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")

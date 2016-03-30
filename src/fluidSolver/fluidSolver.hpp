@@ -8,6 +8,9 @@
 #include <Windows.h>
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+#include <memory>
+
+#include "../geom/grid.hpp"
 
 
 class FS_Solver
@@ -27,6 +30,7 @@ struct FS_TestSolverInfo
 	float gravity;
 	float bounds[6];
 	GLint isOpen[6];
+	std::shared_ptr<FS_MACGrid> grid;
 };
 
 

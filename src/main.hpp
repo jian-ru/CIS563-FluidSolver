@@ -9,6 +9,7 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <string>
+#include <tbb/parallel_for.h>
 
 #define _GPU_INFO
 

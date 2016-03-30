@@ -2,6 +2,7 @@
 //  scene.cpp
 //  Thanda
 
+#include <iomanip>
 #include <iostream>
 #include "scene.hpp"
 
@@ -58,16 +59,36 @@ void FS_Scene::update()
 {
 	static bool onceThrough = false;
 	static double timeLastFrame;
+	static int frameCount = 0;
+	const int N = 10;
+	static float realDeltaTimeLastNFrames[N] = { 0 };
+
+	static float deltaTime;
+	const float maxDeltaTime = 1.f / 24.f;
 
 	if (!onceThrough)
 	{
 		timeLastFrame = glfwGetTime();
+		deltaTime = maxDeltaTime;
 		onceThrough = true;
 	}
 
+	// calculate frame rate
 	double curTime = glfwGetTime();
-	float deltaTime = curTime - timeLastFrame;
+	realDeltaTimeLastNFrames[frameCount++ % N] = curTime - timeLastFrame;
 	timeLastFrame = curTime;
+
+	// display frame rate
+	if (frameCount % N == 0 && frameCount >= N)
+	{
+		float average = 0.f;
+		for (int i = 0; i < N; ++i)
+		{
+			average += realDeltaTimeLastNFrames[i];
+		}
+		average /= static_cast<float>(N);
+		std::cout << "Frame rate is: " << std::setprecision(3) << 1.f / average << '\n';
+	}
 	
 	FS_TestSolverInfo info;
 	std::shared_ptr<FS_BoxContainer> c = std::dynamic_pointer_cast<FS_BoxContainer>(containers[0]);
@@ -79,15 +100,17 @@ void FS_Scene::update()
 	info.bounds[4] = c->minZ;
 	info.bounds[5] = c->maxZ;
 	info.gravity = -9.8f; // test value
-	info.numParticles = grid->particles.size();
+	info.numParticles = grid->particles->size();
 	info.isOpen[0] = (int)c->isOpen[0];
 	info.isOpen[1] = (int)c->isOpen[1];
 	info.isOpen[2] = (int)c->isOpen[2];
 	info.isOpen[3] = (int)c->isOpen[3];
 	info.isOpen[4] = (int)c->isOpen[4];
 	info.isOpen[5] = (int)c->isOpen[5];
+	info.grid = grid;
 
 	solver->solve(deltaTime, grid->debugVBO1, &info);
+	deltaTime = fmin(maxDeltaTime, grid->cellSize / grid->maxVelocity.length());
 }
 
 

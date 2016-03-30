@@ -44,6 +44,14 @@ void FS_TestSolver::solve(float deltaTime, GLuint vbo, void * additionalInfo)
 {
 	FS_TestSolverInfo *info = reinterpret_cast<FS_TestSolverInfo *>(additionalInfo);
 
+	info->grid->transferParticleVelocityToGrid();
+	info->grid->extrapolateVelocity();
+	info->grid->saveVelocities();
+	info->grid->accelerateByGravity(deltaTime);
+	info->grid->interpolateVelocityDifference();
+	info->grid->interpolateVelocity();
+	info->grid->swapActiveParticleArray();
+
 	glUseProgram(program);
 	
 	// Set uniforms
@@ -55,6 +63,9 @@ void FS_TestSolver::solve(float deltaTime, GLuint vbo, void * additionalInfo)
 	glUniform3f(g_loc, 0.f, info->gravity, 0.f);
 	glUniform1fv(b_loc, 6, info->bounds);
 	glUniform1iv(io_loc, 6, info->isOpen);
+
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, vbo);
+	glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, info->grid->particles->size() * sizeof(FS_Particle), info->grid->particles->data());
 
 	// Set SSBO
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, vbo);

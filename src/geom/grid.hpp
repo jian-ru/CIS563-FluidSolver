@@ -6,11 +6,11 @@
 
 #include "geom.hpp"
 
-
+template <class T>
 class FS_Grid
 {
 public:
-	std::vector<float> values;
+	std::vector<T> values;
 	int xsize, ysize, zsize;
 
 	FS_Grid() {}
@@ -22,15 +22,20 @@ public:
 
 	void zeromem();
 
-	float &operator()(int i, int j, int k);
+	T &operator()(int i, int j, int k);
 };
 
 
 class FS_MACGrid : public FS_Geometry
 {
 public:
-	FS_Grid us, vs, ws, ps;
-	std::vector<FS_Particle> particles;
+	FS_Grid<float> us, vs, ws, ps;
+	FS_Grid<float> tmp_us, tmp_vs, tmp_ws;
+	FS_Grid<int> cellTypes; // 0 - air, 1 - fluid, 2 - solid
+	std::shared_ptr<std::vector<FS_Particle> > particles;
+	std::shared_ptr<std::vector<FS_Particle> > particles1;
+	std::shared_ptr<std::vector<FS_Particle> > particles2;
+	glm::vec3 maxVelocity;
 	
 	FS_BBox bounds;
 	float cellSize;
@@ -50,16 +55,40 @@ public:
 
 	virtual ~FS_MACGrid() {}
 
+	// fill the grid with particles
 	void init();
 
 	void transferParticleVelocityToGrid();
 
-	// From grid to particle;
+	// From grid to particle (PIC)
 	void interpolateVelocity();
+
+	// Call this before interpolateVelocity()
+	// Also copy updated positions
+	// FLIP
+	void interpolateVelocityDifference();
+
+	void saveVelocities();
+
+	void accelerateByGravity(float deltaTime, float amount = -9.8f);
+
+	void extrapolateVelocity();
+	// return false if (i, j, k) has no fluid neighbour
+	bool averageVelocityFromNeighbours(int i, int j, int k);
+
+	void swapActiveParticleArray();
 
 	virtual void setup();
 	virtual void render(std::shared_ptr<FS_Camera> pCam);
 	virtual void cleanup();
+
+	// for debug drawing of cell types
+	bool indicatorBufferGenerated;
+	GLuint airVertexBufferName, fluidVertexBufferName, solidVertexBufferName;
+	std::vector<float> airIndicators, fluidIndicators, solidIndicators; // position
+
+	void updateCellTypeDebugBuffer();
+	void drawCellTypeIndicators(GLint uniColorLoc);
 };
 
 #endif // GRIP_HPP
