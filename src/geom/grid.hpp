@@ -78,6 +78,14 @@ public:
 
 	void swapActiveParticleArray();
 
+	void updatePressureAndVelocity(float deltaTime);
+
+	float findMaxSpeed();
+
+	// sample the grid and build a SDF
+	// write the resulting SDF as a VDB file
+	void buildSDF();
+
 	virtual void setup();
 	virtual void render(std::shared_ptr<FS_Camera> pCam);
 	virtual void cleanup();

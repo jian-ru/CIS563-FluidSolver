@@ -48,8 +48,11 @@ void FS_TestSolver::solve(float deltaTime, GLuint vbo, void * additionalInfo)
 	info->grid->extrapolateVelocity();
 	info->grid->saveVelocities();
 	info->grid->accelerateByGravity(deltaTime);
-	info->grid->interpolateVelocityDifference();
-	info->grid->interpolateVelocity();
+	// pressure solve and update velocities according to pressure gradients
+	info->grid->updatePressureAndVelocity(deltaTime);
+	//info->grid->extrapolateVelocity(); // Don't extrapolate here. It will ruin divergence free velocity field
+	info->grid->interpolateVelocityDifference(); // FLIP
+	info->grid->interpolateVelocity(); // PIC
 	info->grid->swapActiveParticleArray();
 
 	glUseProgram(program);

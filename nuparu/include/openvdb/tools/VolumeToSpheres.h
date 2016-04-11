@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////
 //
-// Copyright (c) 2012-2013 DreamWorks Animation LLC
+// Copyright (c) 2012-2015 DreamWorks Animation LLC
 //
 // All rights reserved. This software is distributed under the
 // Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )
@@ -123,7 +123,7 @@ fillWithSpheres(
 
 
 /// @brief  Accelerated closest surface point queries for narrow band level sets.
-///         Supports queries that originate at arbitrary worldspace locations, is
+///         Supports queries that originate at arbitrary world-space locations, is
 ///         not confined to the narrow band region of the input volume geometry.
 template<typename GridT>
 class ClosestSurfacePoint
@@ -320,10 +320,9 @@ public:
         const std::vector<IndexRange>& leafRanges,
         const std::vector<Vec4R>& leafBoundingSpheres);
 
-    void run(bool threaded = true);
+    inline void run(bool threaded = true);
 
-
-    void operator()(const tbb::blocked_range<size_t>&) const;
+    inline void operator()(const tbb::blocked_range<size_t>&) const;
 
 private:
     std::vector<Vec4R>& mNodeBoundingSpheres;
@@ -354,7 +353,7 @@ NodeBS::run(bool threaded)
 inline void
 NodeBS::operator()(const tbb::blocked_range<size_t>& range) const
 {
-    Vec3s avg, pos;
+    Vec3d avg, pos;
 
     for (size_t n = range.begin(); n != range.end(); ++n) {
 
@@ -362,7 +361,7 @@ NodeBS::operator()(const tbb::blocked_range<size_t>& range) const
         avg[1] = 0.0;
         avg[2] = 0.0;
 
-        int count = mLeafRanges[n].second - mLeafRanges[n].first;
+        int count = int(mLeafRanges[n].second) - int(mLeafRanges[n].first);
 
         for (size_t i = mLeafRanges[n].first; i < mLeafRanges[n].second; ++i) {
             avg[0] += mLeafBoundingSpheres[i][0];
@@ -373,14 +372,14 @@ NodeBS::operator()(const tbb::blocked_range<size_t>& range) const
         if (count > 1) avg *= float(1.0 / double(count));
 
 
-        float maxDist = 0.0;
+        double maxDist = 0.0;
 
         for (size_t i = mLeafRanges[n].first; i < mLeafRanges[n].second; ++i) {
             pos[0] = mLeafBoundingSpheres[i][0];
             pos[1] = mLeafBoundingSpheres[i][1];
             pos[2] = mLeafBoundingSpheres[i][2];
 
-            float tmpDist = (pos - avg).lengthSqr() + mLeafBoundingSpheres[i][3];
+            double tmpDist = (pos - avg).lengthSqr() + mLeafBoundingSpheres[i][3];
             if (tmpDist > maxDist) maxDist = tmpDist;
         }
 
@@ -512,15 +511,16 @@ ClosestPointDist<IntLeafT>::evalNode(size_t pointIndex, size_t nodeIndex) const
     Vec3R center;
     bool updatedDist = false;
 
-    for (size_t i = mLeafRanges[nodeIndex].first, n = 0; i < mLeafRanges[nodeIndex].second; ++i, ++n) {
-
+    for (size_t i = mLeafRanges[nodeIndex].first, n = 0;
+        i < mLeafRanges[nodeIndex].second; ++i, ++n)
+    {
         float& distToLeaf = const_cast<float&>(mLeafDistances[n]);
 
         center[0] = mLeafBoundingSpheres[i][0];
         center[1] = mLeafBoundingSpheres[i][1];
         center[2] = mLeafBoundingSpheres[i][2];
 
-        distToLeaf = (pos - center).lengthSqr() - mLeafBoundingSpheres[i][3];
+        distToLeaf = float((pos - center).lengthSqr() - mLeafBoundingSpheres[i][3]);
 
         if (distToLeaf < minDist) {
             minDist = distToLeaf;
@@ -533,7 +533,9 @@ ClosestPointDist<IntLeafT>::evalNode(size_t pointIndex, size_t nodeIndex) const
 
     evalLeaf(pointIndex, *mLeafNodes[minDistIdx]);
 
-    for (size_t i = mLeafRanges[nodeIndex].first, n = 0; i < mLeafRanges[nodeIndex].second; ++i, ++n) {
+    for (size_t i = mLeafRanges[nodeIndex].first, n = 0;
+        i < mLeafRanges[nodeIndex].second; ++i, ++n)
+    {
         if (mLeafDistances[n] < mInstanceDistances[pointIndex] && i != minDistIdx) {
             evalLeaf(pointIndex, *mLeafNodes[i]);
         }
@@ -559,7 +561,7 @@ ClosestPointDist<IntLeafT>::operator()(const tbb::blocked_range<size_t>& range) 
             center[1] = mNodeBoundingSpheres[i][1];
             center[2] = mNodeBoundingSpheres[i][2];
 
-            distToNode = (pos - center).lengthSqr() - mNodeBoundingSpheres[i][3];
+            distToNode = float((pos - center).lengthSqr() - mNodeBoundingSpheres[i][3]);
 
             if (distToNode < minDist) {
                 minDist = distToNode;
@@ -593,13 +595,13 @@ public:
         bool overlapping);
 
     float radius() const { return mRadius; }
-    int index() const { return mIndex; };
+    int index() const { return mIndex; }
 
-    void run(bool threaded = true);
+    inline void run(bool threaded = true);
 
 
     UpdatePoints(UpdatePoints&, tbb::split);
-    void operator()(const tbb::blocked_range<size_t>& range);
+    inline void operator()(const tbb::blocked_range<size_t>& range);
     void join(const UpdatePoints& rhs)
     {
         if (rhs.mRadius > mRadius) {
@@ -684,7 +686,7 @@ UpdatePoints::operator()(const tbb::blocked_range<size_t>& range)
 
         if (mDistances[n] > mRadius) {
             mRadius = mDistances[n];
-            mIndex = n;
+            mIndex = int(n);
         }
     }
 }
@@ -722,11 +724,6 @@ fillWithSpheres(
     typedef typename TreeT::template ValueConverter<int>::Type IntTreeT;
     typedef typename TreeT::template ValueConverter<Int16>::Type Int16TreeT;
 
-    typedef tree::LeafManager<const TreeT> LeafManagerT;
-    typedef tree::LeafManager<IntTreeT>    IntLeafManagerT;
-    typedef tree::LeafManager<Int16TreeT>  Int16LeafManagerT;
-
-
     typedef boost::mt11213b RandGen;
     RandGen mtRand(/*seed=*/0);
 
@@ -753,8 +750,8 @@ fillWithSpheres(
         instancePoints.reserve(instances);
         internal::PointAccessor ptnAcc(instancePoints);
 
-        UniformPointScatter<internal::PointAccessor, RandGen, InterrupterT>
-            scatter(ptnAcc, (addNBPoints ? (instances / 2) : instances), mtRand, interrupter);
+        UniformPointScatter<internal::PointAccessor, RandGen, InterrupterT> scatter(
+            ptnAcc, Index64(addNBPoints ? (instances / 2) : instances), mtRand, interrupter);
 
         scatter(*interiorMaskPtr);
     }
@@ -767,7 +764,7 @@ fillWithSpheres(
     csp.initialize(grid, isovalue, interrupter);
 
     // add extra instance points in the interior narrow band.
-    if (instancePoints.size() < instances) {
+    if (instancePoints.size() < size_t(instances)) {
         const Int16TreeT& signTree = csp.signTree();
         typename Int16TreeT::LeafNodeType::ValueOnCIter it;
         typename Int16TreeT::LeafCIter leafIt = signTree.cbeginLeaf();
@@ -779,9 +776,9 @@ fillWithSpheres(
                     instancePoints.push_back(transform.indexToWorld(it.getCoord()));
                 }
 
-                if (instancePoints.size() == instances) break;
+                if (instancePoints.size() == size_t(instances)) break;
             }
-            if (instancePoints.size() == instances) break;
+            if (instancePoints.size() == size_t(instances)) break;
         }
     }
 
@@ -797,14 +794,14 @@ fillWithSpheres(
     for (size_t n = 0, N = instancePoints.size(); n < N; ++n) {
         if (instanceRadius[n] > largestRadius) {
             largestRadius = instanceRadius[n];
-            largestRadiusIdx = n;
+            largestRadiusIdx = int(n);
         }
     }
 
     Vec3s pos;
     Vec4s sphere;
-    minRadius *= transform.voxelSize()[0];
-    maxRadius *= transform.voxelSize()[0];
+    minRadius = float(minRadius * transform.voxelSize()[0]);
+    maxRadius = float(maxRadius * transform.voxelSize()[0]);
 
     for (size_t s = 0, S = std::min(size_t(maxSphereCount), instancePoints.size()); s < S; ++s) {
 
@@ -822,7 +819,8 @@ fillWithSpheres(
         spheres.push_back(sphere);
         instanceMask[largestRadiusIdx] = 1;
 
-        internal::UpdatePoints op(sphere, instancePoints, instanceRadius, instanceMask, overlapping);
+        internal::UpdatePoints op(
+            sphere, instancePoints, instanceRadius, instanceMask, overlapping);
         op.run();
 
         largestRadius = op.radius();
@@ -923,7 +921,7 @@ ClosestSurfacePoint<GridT>::initialize(
     dim[2] = std::abs(dim[2]);
 
     mMaxRadiusSqr = std::min(std::min(dim[0], dim[1]), dim[2]);
-    mMaxRadiusSqr *= 0.51;
+    mMaxRadiusSqr *= 0.51f;
     mMaxRadiusSqr *= mMaxRadiusSqr;
 
 
@@ -974,7 +972,8 @@ ClosestSurfacePoint<GridT>::initialize(
     std::vector<Vec4R>().swap(mLeafBoundingSpheres);
     mLeafBoundingSpheres.resize(mLeafNodes.size());
 
-    internal::LeafBS<IntLeafT> leafBS(mLeafBoundingSpheres, mLeafNodes, transform, mSurfacePointList);
+    internal::LeafBS<IntLeafT> leafBS(
+        mLeafBoundingSpheres, mLeafNodes, transform, mSurfacePointList);
     leafBS.run();
 
 
@@ -1017,7 +1016,8 @@ ClosestSurfacePoint<GridT>::search(const std::vector<Vec3R>& points, std::vector
 
 template<typename GridT>
 bool
-ClosestSurfacePoint<GridT>::searchAndReplace(std::vector<Vec3R>& points, std::vector<float>& distances)
+ClosestSurfacePoint<GridT>::searchAndReplace(std::vector<Vec3R>& points,
+    std::vector<float>& distances)
 {
     return search(points, distances, true);
 }
@@ -1029,6 +1029,6 @@ ClosestSurfacePoint<GridT>::searchAndReplace(std::vector<Vec3R>& points, std::ve
 
 #endif // OPENVDB_TOOLS_VOLUME_TO_MESH_HAS_BEEN_INCLUDED
 
-// Copyright (c) 2012-2013 DreamWorks Animation LLC
+// Copyright (c) 2012-2015 DreamWorks Animation LLC
 // All rights reserved. This software is distributed under the
 // Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )

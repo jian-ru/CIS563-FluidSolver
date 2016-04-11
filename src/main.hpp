@@ -5,11 +5,21 @@
 #ifndef main_hpp
 #define main_hpp
 
+#include <openvdb/openvdb.h>
+#include <openvdb/tools/LevelSetSphere.h>
+#include <openvdb/tools/SignedFloodFill.h>
+#include <openvdb/tools/ParticlesToLevelSet.h>
 #include <Windows.h>
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <string>
 #include <tbb/parallel_for.h>
+#include <tbb/blocked_range.h>
+#include <tbb/blocked_range2d.h>
+#include <tbb/blocked_range3d.h>
+#include <tbb/mutex.h>
+#include <tbb/queuing_mutex.h>
+
 
 #define _GPU_INFO
 

@@ -1,3 +1,30 @@
+# Submission 04
+
+IMPORTANT:
+    1. After generating the project using cmake and running it once to generate executable,
+       please copy tbb_debug.dll and Half.dll from nuparu/lib/win into where the executable resides.
+	   
+    2. Libraries used were compiled with VS 14 x64 compiler. They may not work with your compiler
+	   if you are using a different one.
+	   
+	3. Uncomment buildSDF() in FS_Grid::render() to enable writing VDB files.
+	   You may want to change the ouput directory specified in FS_Grid::buildSDF().
+	   
+Min OpenGL requirement: 4.3
+Visual Studio requirement: 14 (2015) x64
+
+Parallelization Performance Analysis (10 x 10 grid with 8 particles per cell):
+    Topic                                  Serial(FPS)      Parallel(FPS)      Comparison      Reason(if negative)
+    Interpolation (grid to particles)      ~= 5.0           ~= 7.0             +40%
+	Interpolation (particles to grid)      ~= 7.0           ~= 6.0             -14.2%          Mutex overhead
+	Extrapolation                          ~= 6.5           ~= 7.0             +7.7%
+
+Updates:
+	1. Pressure solve
+	2. Parallelization
+	3. Meshing using OpenVDB
+	
+	
 # Submission 03
 
 IMPORTANT: after generating the project using cmake and running it once to generate executable,

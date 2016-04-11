@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////
 //
-// Copyright (c) 2012-2013 DreamWorks Animation LLC
+// Copyright (c) 2012-2015 DreamWorks Animation LLC
 //
 // All rights reserved. This software is distributed under the
 // Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )
@@ -38,6 +38,7 @@
 #include <cassert>
 #include <cstring>
 #include <iostream>// for cout
+#include <openvdb/Platform.h>
 #include <openvdb/Types.h>
 //#include <boost/mpl/if.hpp>
 //#include <strings.h> // for ffs
@@ -52,7 +53,10 @@ inline Index32
 CountOn(Byte v)
 {
     // Simple LUT:
-    static const Byte numBits[256] = {
+#ifndef _MSC_VER // Visual C++ doesn't guarantee thread-safe initialization of local statics
+    static
+#endif
+    const Byte numBits[256] = {
 #   define B2(n)  n,     n+1,     n+1,     n+2
 #   define B4(n)  B2(n), B2(n+1), B2(n+1), B2(n+2)
 #   define B6(n)  B4(n), B4(n+1), B4(n+1), B4(n+2)
@@ -69,7 +73,7 @@ CountOn(Byte v)
     //return (v * UINT64_C(0x200040008001) & UINT64_C(0x111111111111111)) % 0xF;
 }
 /// Return the number of off bits in the given 8-bit value.
-inline Index32 CountOff(Byte v) { return CountOn(~v); }
+inline Index32 CountOff(Byte v) { return CountOn(static_cast<Byte>(~v)); }
 
 /// Return the number of on bits in the given 32-bit value.
 inline Index32
@@ -89,7 +93,8 @@ CountOn(Index64 v)
 {
     v = v - ((v >> 1) & UINT64_C(0x5555555555555555));
     v = (v & UINT64_C(0x3333333333333333)) + ((v >> 2) & UINT64_C(0x3333333333333333));
-    return (((v + (v >> 4)) & UINT64_C(0xF0F0F0F0F0F0F0F)) * UINT64_C(0x101010101010101)) >> 56;
+    return static_cast<Index32>(
+        (((v + (v >> 4)) & UINT64_C(0xF0F0F0F0F0F0F0F)) * UINT64_C(0x101010101010101)) >> 56);
 }
 
 /// Return the number of off bits in the given 64-bit value.
@@ -100,7 +105,10 @@ inline Index32
 FindLowestOn(Byte v)
 {
     assert(v);
-    static const Byte DeBruijn[8] = {0, 1, 6, 2, 7, 5, 4, 3};
+#ifndef _MSC_VER // Visual C++ doesn't guarantee thread-safe initialization of local statics
+    static
+#endif
+    const Byte DeBruijn[8] = {0, 1, 6, 2, 7, 5, 4, 3};
     return DeBruijn[Byte((v & -v) * 0x1DU) >> 5];
 }
 
@@ -110,7 +118,10 @@ FindLowestOn(Index32 v)
 {
     assert(v);
     //return ffs(v);
-    static const Byte DeBruijn[32] = {
+#ifndef _MSC_VER // Visual C++ doesn't guarantee thread-safe initialization of local statics
+    static
+#endif
+    const Byte DeBruijn[32] = {
         0, 1, 28, 2, 29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4, 8,
         31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6, 11, 5, 10, 9
     };
@@ -123,7 +134,10 @@ FindLowestOn(Index64 v)
 {
     assert(v);
     //return ffsll(v);
-    static const Byte DeBruijn[64] = {
+#ifndef _MSC_VER // Visual C++ doesn't guarantee thread-safe initialization of local statics
+    static
+#endif
+    const Byte DeBruijn[64] = {
         0,   1,  2, 53,  3,  7, 54, 27, 4,  38, 41,  8, 34, 55, 48, 28,
         62,  5, 39, 46, 44, 42, 22,  9, 24, 35, 59, 56, 49, 18, 29, 11,
         63, 52,  6, 26, 37, 40, 33, 47, 61, 45, 43, 21, 23, 58, 17, 10,
@@ -136,7 +150,10 @@ FindLowestOn(Index64 v)
 inline Index32
 FindHighestOn(Index32 v)
 {
-    static const Byte DeBruijn[32] = {
+#ifndef _MSC_VER // Visual C++ doesn't guarantee thread-safe initialization of local statics
+    static
+#endif
+    const Byte DeBruijn[32] = {
         0, 9, 1, 10, 13, 21, 2, 29, 11, 14, 16, 18, 22, 25, 3, 30,
         8, 12, 20, 28, 15, 17, 24, 7, 19, 27, 23, 6, 26, 5, 4, 31
     };
@@ -311,7 +328,7 @@ public:
     /// Default constructor sets all bits off
     NodeMask() { this->setOff(); }
     /// All bits are set to the specified state
-    NodeMask(bool on) { this->set(on); }
+     NodeMask(bool on) { this->set(on); }
     /// Copy constructor
     NodeMask(const NodeMask &other) { *this = other; }
     /// Destructor
@@ -348,33 +365,77 @@ public:
     //
     // Bitwise logical operations
     //
-    NodeMask operator!() const { NodeMask m(*this); m.toggle(); return m; }
+    
+    /// @brief Apply a functor to the words of the this and the other mask.
+    ///
+    /// @details An example that implements the "operator&=" method:
+    /// @code
+    /// struct Op { inline void operator()(W &w1, const W& w2) const { w1 &= w2; } };
+    /// @endcode
+    template<typename WordOp>
+    const NodeMask& foreach(const NodeMask& other, const WordOp& op)
+    {
+        Word *w1 = mWords;
+        const Word *w2 = other.mWords;
+        for (Index32 n = WORD_COUNT; n--;  ++w1, ++w2) op( *w1, *w2);
+        return *this;
+    }
+    template<typename WordOp>
+    const NodeMask& foreach(const NodeMask& other1, const NodeMask& other2, const WordOp& op)
+    {
+        Word *w1 = mWords;
+        const Word *w2 = other1.mWords, *w3 = other2.mWords;
+        for (Index32 n = WORD_COUNT; n--;  ++w1, ++w2, ++w3) op( *w1, *w2, *w3);
+        return *this;
+    }
+    template<typename WordOp>
+    const NodeMask& foreach(const NodeMask& other1, const NodeMask& other2, const NodeMask& other3,
+                            const WordOp& op)
+    {
+        Word *w1 = mWords;
+        const Word *w2 = other1.mWords, *w3 = other2.mWords, *w4 = other3.mWords;
+        for (Index32 n = WORD_COUNT; n--;  ++w1, ++w2, ++w3, ++w4) op( *w1, *w2, *w3, *w4);
+        return *this;
+    }
+    /// @brief Bitwise intersection
     const NodeMask& operator&=(const NodeMask& other)
     {
-        Index32 n = WORD_COUNT;
-        const Word* w2 = other.mWords;
-        for ( Word* w1 = mWords; n--; ++w1, ++w2) *w1 &= *w2;
+        Word *w1 = mWords;
+        const Word *w2 = other.mWords;
+        for (Index32 n = WORD_COUNT; n--;  ++w1, ++w2) *w1 &= *w2;
         return *this;
     }
+    /// @brief Bitwise union 
     const NodeMask& operator|=(const NodeMask& other)
     {
-        Index32 n = WORD_COUNT;
-        const Word* w2 = other.mWords;
-        for ( Word* w1 = mWords; n--; ++w1, ++w2) *w1 |= *w2;
+        Word *w1 = mWords;
+        const Word *w2 = other.mWords;
+        for (Index32 n = WORD_COUNT; n--;  ++w1, ++w2) *w1 |= *w2;
         return *this;
     }
+    /// @brief Bitwise difference
+    const NodeMask& operator-=(const NodeMask& other)
+    {
+        Word *w1 = mWords;
+        const Word *w2 = other.mWords;
+        for (Index32 n = WORD_COUNT; n--;  ++w1, ++w2) *w1 &= ~*w2;
+        return *this;
+    }
+    /// @brief Bitwise XOR
     const NodeMask& operator^=(const NodeMask& other)
     {
-        Index32 n = WORD_COUNT;
-        const Word* w2 = other.mWords;
-        for ( Word* w1 = mWords; n--; ++w1, ++w2) *w1 ^= *w2;
+        Word *w1 = mWords;
+        const Word *w2 = other.mWords;
+        for (Index32 n = WORD_COUNT; n--;  ++w1, ++w2) *w1 ^= *w2;
         return *this;
     }
+    NodeMask operator!()                      const { NodeMask m(*this); m.toggle(); return m; }
     NodeMask operator&(const NodeMask& other) const { NodeMask m(*this); m &= other; return m; }
     NodeMask operator|(const NodeMask& other) const { NodeMask m(*this); m |= other; return m; }
     NodeMask operator^(const NodeMask& other) const { NodeMask m(*this); m ^= other; return m; }
+   
     /// Return the byte size of this NodeMask
-    static Index32 memUsage() { return WORD_COUNT*sizeof(Word); }
+    static Index32 memUsage() { return static_cast<Index32>(WORD_COUNT*sizeof(Word)); }
     /// Return the total number of on bits
     Index32 countOn() const
     {
@@ -418,7 +479,7 @@ public:
     /// Toggle the state of the <i>n</i>th bit
     void toggle(Index32 n) {
         assert( (n >> 6) < WORD_COUNT );
-        mWords[n >> 6] ^= 1 << (n & 63);
+        mWords[n >> 6] ^= Word(1) << (n & 63);
     }
     /// Toggle the state of all bits in the mask
     void toggle()
@@ -590,22 +651,57 @@ public:
     //
     // Bitwise logical operations
     //
-    NodeMask operator!() const { NodeMask m(*this); m.toggle(); return m; }
+    
+    /// @brief Apply a functor to the words of the this and the other mask.
+    ///
+    /// @details An example that implements the "operator&=" method:
+    /// @code
+    /// struct Op { inline void operator()(Word &w1, const Word& w2) const { w1 &= w2; } };
+    /// @endcode
+    template<typename WordOp>
+    const NodeMask& foreach(const NodeMask& other, const WordOp& op)
+    {
+        op(mByte, other.mByte);
+        return *this;
+    }
+    template<typename WordOp>
+    const NodeMask& foreach(const NodeMask& other1, const NodeMask& other2, const WordOp& op)
+    {
+        op(mByte, other1.mByte, other2.mByte);
+        return *this;
+    }
+    template<typename WordOp>
+    const NodeMask& foreach(const NodeMask& other1, const NodeMask& other2, const NodeMask& other3,
+                            const WordOp& op)
+    {
+        op(mByte, other1.mByte, other2.mByte, other3.mByte);
+        return *this;
+    }
+    /// @brief Bitwise intersection
     const NodeMask& operator&=(const NodeMask& other)
     {
         mByte &= other.mByte;
         return *this;
     }
+    /// @brief Bitwise union 
     const NodeMask& operator|=(const NodeMask& other)
     {
         mByte |= other.mByte;
         return *this;
     }
+    /// @brief Bitwise difference 
+    const NodeMask& operator-=(const NodeMask& other)
+    {
+        mByte &= static_cast<Byte>(~other.mByte);
+        return *this;
+    }
+    /// @brief Bitwise XOR
     const NodeMask& operator^=(const NodeMask& other)
     {
         mByte ^= other.mByte;
         return *this;
     }
+    NodeMask operator!()                      const { NodeMask m(*this); m.toggle(); return m; }
     NodeMask operator&(const NodeMask& other) const { NodeMask m(*this); m &= other; return m; }
     NodeMask operator|(const NodeMask& other) const { NodeMask m(*this); m |= other; return m; }
     NodeMask operator^(const NodeMask& other) const { NodeMask m(*this); m ^= other; return m; }
@@ -618,12 +714,12 @@ public:
     /// Set the <i>n</i>th  bit on
     void setOn(Index32 n) {
         assert( n  < 8 );
-        mByte |= 0x01U << (n & 7);
+        mByte = mByte | static_cast<Byte>(0x01U << (n & 7));
     }
     /// Set the <i>n</i>th bit off
     void setOff(Index32 n) {
         assert( n  < 8 );
-        mByte &= ~(0x01U << (n & 7));
+        mByte = mByte & static_cast<Byte>(~(0x01U << (n & 7)));
     }
     /// Set the <i>n</i>th bit to the specified state
     void set(Index32 n, bool On) { On ? this->setOn(n) : this->setOff(n); }
@@ -636,10 +732,10 @@ public:
     /// Toggle the state of the <i>n</i>th bit
     void toggle(Index32 n) {
         assert( n  < 8 );
-        mByte ^= 0x01U << (n & 7);
+        mByte = mByte ^ static_cast<Byte>(0x01U << (n & 7));
     }
     /// Toggle the state of all bits in the mask
-    void toggle() { mByte = ~mByte; }
+    void toggle() { mByte = static_cast<Byte>(~mByte); }
     /// Set the first bit on
     void setFirstOn()  { this->setOn(0); }
     /// Set the last bit on
@@ -663,7 +759,7 @@ public:
     Index32 findFirstOn() const { return mByte ? FindLowestOn(mByte) : 8; }
     Index32 findFirstOff() const
     {
-        const Byte b = ~mByte;
+        const Byte b = static_cast<Byte>(~mByte);
         return b ? FindLowestOn(b) : 8;
     }
     /*
@@ -711,14 +807,14 @@ public:
     Index32 findNextOn(Index32 start) const
     {
         if (start>=8) return 8;
-        const Byte b = mByte & (0xFFU << start);
+        const Byte b = static_cast<Byte>(mByte & (0xFFU << start));
         return  b ? FindLowestOn(b) : 8;
     }
 
     Index32 findNextOff(Index32 start) const
     {
         if (start>=8) return 8;
-        const Byte b = ~mByte & (0xFFU << start);
+        const Byte b = static_cast<Byte>(~mByte & (0xFFU << start));
         return  b ? FindLowestOn(b) : 8;
     }
 
@@ -771,22 +867,57 @@ public:
     //
     // Bitwise logical operations
     //
-    NodeMask operator!() const { NodeMask m(*this); m.toggle(); return m; }
+
+    /// @brief Apply a functor to the words of the this and the other mask.
+    ///
+    /// @details An example that implements the "operator&=" method:
+    /// @code
+    /// struct Op { inline void operator()(Word &w1, const Word& w2) const { w1 &= w2; } };
+    /// @endcode
+    template<typename WordOp>
+    const NodeMask& foreach(const NodeMask& other, const WordOp& op)
+    {
+        op(mWord, other.mWord);
+        return *this;
+    }
+    template<typename WordOp>
+    const NodeMask& foreach(const NodeMask& other1, const NodeMask& other2, const WordOp& op)
+    {
+        op(mWord, other1.mWord, other2.mWord);
+        return *this;
+    }
+    template<typename WordOp>
+    const NodeMask& foreach(const NodeMask& other1, const NodeMask& other2, const NodeMask& other3,
+                            const WordOp& op)
+    {
+        op(mWord, other1.mWord, other2.mWord, other3.mWord);
+        return *this;
+    }
+    /// @brief Bitwise intersection
     const NodeMask& operator&=(const NodeMask& other)
     {
         mWord &= other.mWord;
         return *this;
     }
+    /// @brief Bitwise union
     const NodeMask& operator|=(const NodeMask& other)
     {
         mWord |= other.mWord;
         return *this;
     }
+    /// @brief Bitwise difference 
+    const NodeMask& operator-=(const NodeMask& other)
+    {
+        mWord &= ~other.mWord;
+        return *this;
+    }
+    /// @brief Bitwise XOR
     const NodeMask& operator^=(const NodeMask& other)
     {
         mWord ^= other.mWord;
         return *this;
     }
+    NodeMask operator!()                      const { NodeMask m(*this); m.toggle(); return m; }
     NodeMask operator&(const NodeMask& other) const { NodeMask m(*this); m &= other; return m; }
     NodeMask operator|(const NodeMask& other) const { NodeMask m(*this); m |= other; return m; }
     NodeMask operator^(const NodeMask& other) const { NodeMask m(*this); m ^= other; return m; }
@@ -1126,7 +1257,9 @@ public:
     }
 
 
-    Index32 getMemUsage() const {return mIntSize*sizeof(Index32) + sizeof(*this);}
+    Index32 getMemUsage() const {
+        return static_cast<Index32>(mIntSize*sizeof(Index32) + sizeof(*this));
+    }
 
     Index32 countOn() const {
         assert(mBits);
@@ -1263,7 +1396,7 @@ public:
 
     Index32 memUsage() const {
         assert(mBits);
-        return sizeof(Index32*)+(2+mIntSize)*sizeof(Index32);//in bytes
+        return static_cast<Index32>(sizeof(Index32*)+(2+mIntSize)*sizeof(Index32));//in bytes
     }
 }; // class RootNodeMask
 
@@ -1273,6 +1406,6 @@ public:
 
 #endif // OPENVDB_UTIL_NODEMASKS_HAS_BEEN_INCLUDED
 
-// Copyright (c) 2012-2013 DreamWorks Animation LLC
+// Copyright (c) 2012-2015 DreamWorks Animation LLC
 // All rights reserved. This software is distributed under the
 // Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )

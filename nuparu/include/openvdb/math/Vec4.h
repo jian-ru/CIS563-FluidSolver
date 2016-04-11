@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////
 //
-// Copyright (c) 2012-2013 DreamWorks Animation LLC
+// Copyright (c) 2012-2015 DreamWorks Animation LLC
 //
 // All rights reserved. This software is distributed under the
 // Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )
@@ -58,7 +58,7 @@ public:
     /// Constructor with one argument, e.g.   Vec4f v(0);
     explicit Vec4(T val) { this->mm[0] = this->mm[1] = this->mm[2] = this->mm[3] = val; }
 
-    /// Constructor with three arguments, e.g.   Vec4f v(1,2,3);
+    /// Constructor with four arguments, e.g.   Vec4f v(1,2,3,4);
     Vec4(T x, T y, T z, T w)
     {
         this->mm[0] = x;
@@ -252,7 +252,7 @@ public:
     {
         return this->mm[0] + this->mm[1] + this->mm[2] + this->mm[3];
     }
-        
+
 
     /// this = normalized this
     bool normalize(T eps=1.0e-8)
@@ -508,6 +508,36 @@ inline Vec4<typename promote<S, T>::type> operator-(const Vec4<T> &v, S scalar)
     return result;
 }
 
+template <typename T>
+inline bool
+isApproxEqual(const Vec4<T>& a, const Vec4<T>& b)
+{
+    return a.eq(b);
+}
+template <typename T>
+inline bool
+isApproxEqual(const Vec4<T>& a, const Vec4<T>& b, const Vec4<T>& eps)
+{
+    return isApproxEqual(a[0], b[0], eps[0]) &&
+           isApproxEqual(a[1], b[1], eps[1]) &&
+           isApproxEqual(a[2], b[2], eps[2]) &&
+           isApproxEqual(a[3], b[3], eps[3]);
+}
+
+template<typename T>
+inline bool
+isFinite(const Vec4<T>& v)
+{
+    return isFinite(v[0]) && isFinite(v[1]) && isFinite(v[2]) && isFinite(v[3]);
+}
+
+template<typename T>
+inline Vec4<T>
+Abs(const Vec4<T>& v)
+{
+    return Vec4<T>(Abs(v[0]), Abs(v[1]), Abs(v[2]), Abs(v[3]));
+}
+
 /// @remark We are switching to a more explicit name because the semantics
 /// are different from std::min/max. In that case, the function returns a
 /// reference to one of the objects based on a comparator. Here, we must
@@ -536,7 +566,7 @@ inline Vec4<T> maxComponent(const Vec4<T> &v1, const Vec4<T> &v2)
 }
 
 /// @brief Return a vector with the exponent applied to each of
-/// the components of the input vector. 
+/// the components of the input vector.
 template <typename T>
 inline Vec4<T> Exp(Vec4<T> v) { return v.exp(); }
 
@@ -551,6 +581,6 @@ typedef Vec4<double>    Vec4d;
 
 #endif // OPENVDB_MATH_VEC4_HAS_BEEN_INCLUDED
 
-// Copyright (c) 2012-2013 DreamWorks Animation LLC
+// Copyright (c) 2012-2015 DreamWorks Animation LLC
 // All rights reserved. This software is distributed under the
 // Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )

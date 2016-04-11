@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////
 //
-// Copyright (c) 2012-2013 DreamWorks Animation LLC
+// Copyright (c) 2012-2015 DreamWorks Animation LLC
 //
 // All rights reserved. This software is distributed under the
 // Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )
@@ -28,20 +28,45 @@
 //
 ///////////////////////////////////////////////////////////////////////////
 //
+/// @author Ken Museth
+///
 /// @file PointScatter.h
+///
+/// @brief We offer three different algorithms (each in its own class)
+///        for scattering of point in active voxels:
+///
+/// 1) UniformPointScatter. Has two modes: Either randomly distributes
+///    a fixed number of points in the active voxels, or the user can
+///    specify a fixed probability of having a points per unit of volume.
+///
+/// 2) DenseUniformPointScatter. Randomly distributes points in active
+///    voxels using a fixed number of points per voxel.
+///
+/// 3) NonIniformPointScatter. Define the local probability of having
+///    a point in a voxel as the product of a global density and the
+///    value of the voxel itself.
 
 #ifndef OPENVDB_TOOLS_POINT_SCATTER_HAS_BEEN_INCLUDED
 #define OPENVDB_TOOLS_POINT_SCATTER_HAS_BEEN_INCLUDED
 
 #include <openvdb/Types.h>
 #include <openvdb/Grid.h>
+#include <openvdb/math/Math.h>
 #include <openvdb/util/NullInterrupter.h>
-#include <boost/random/uniform_01.hpp>
+#include <tbb/parallel_sort.h>
+#include <tbb/parallel_for.h>
+#include <boost/scoped_array.hpp>
 
 namespace openvdb {
 OPENVDB_USE_VERSION_NAMESPACE
 namespace OPENVDB_VERSION_NAME {
 namespace tools {
+
+/// Forward declaration of base class
+template<typename PointAccessorType,
+         typename RandomGenerator,
+         typename InterruptType = util::NullInterrupter>
+class BasePointScatter;
 
 /// @brief The two point scatters UniformPointScatter and
 /// NonUniformPointScatter depend on the following two classes:
@@ -83,89 +108,76 @@ namespace tools {
 /// (including virtual active voxels in active tiles).
 template<typename PointAccessorType,
          typename RandomGenerator,
-         typename InterruptType = openvdb::util::NullInterrupter>
-class UniformPointScatter
+         typename InterruptType = util::NullInterrupter>
+class UniformPointScatter : public BasePointScatter<PointAccessorType,
+                                                    RandomGenerator,
+                                                    InterruptType>
 {
 public:
+    typedef BasePointScatter<PointAccessorType, RandomGenerator, InterruptType> BaseT;
+
     UniformPointScatter(PointAccessorType& points,
-                        int pointCount,
+                        Index64 pointCount,
                         RandomGenerator& randGen,
-                        InterruptType* interrupt = NULL):
-        mPoints(points),
-        mInterrupter(interrupt),
-        mPointCount(pointCount),
-        mPointsPerVolume(0.0f),
-        mVoxelCount(0),
-        mRandomGen(randGen)
+                        InterruptType* interrupt = NULL)
+        : BaseT(points, randGen, interrupt)
+        , mTargetPointCount(pointCount)
+        , mPointsPerVolume(0.0f)
     {
     }
     UniformPointScatter(PointAccessorType& points,
                         float pointsPerVolume,
                         RandomGenerator& randGen,
-                        InterruptType* interrupt = NULL):
-        mPoints(points),
-        mInterrupter(interrupt),
-        mPointCount(0),
-        mPointsPerVolume(pointsPerVolume),
-        mVoxelCount(0),
-        mRandomGen(randGen)
+                        InterruptType* interrupt = NULL)
+        : BaseT(points, randGen, interrupt)
+        , mTargetPointCount(0)
+        , mPointsPerVolume(pointsPerVolume)
     {
     }
 
-    /// This is the main functor method implementing the actual scattering of points.
+    /// @brief This is the main functor method implementing the actual
+    /// scattering of points.
     template<typename GridT>
-    void operator()(const GridT& grid)
+    bool operator()(const GridT& grid)
     {
         mVoxelCount = grid.activeVoxelCount();
-        if (mVoxelCount == 0) return;
-        const openvdb::Index64 voxelId = mVoxelCount - 1;
-        const openvdb::Vec3d dim = grid.voxelSize();
+        if (mVoxelCount == 0) return false;
+        const Vec3d dim = grid.voxelSize();
         if (mPointsPerVolume>0) {
-            if (mInterrupter) mInterrupter->start("Uniform scattering with fixed point density");
-            mPointCount = int(mPointsPerVolume * dim[0]*dim[1]*dim[2] * mVoxelCount);
-        } else if (mPointCount>0) {
-            if (mInterrupter) mInterrupter->start("Uniform scattering with fixed point count");
-            mPointsPerVolume = mPointCount/float(dim[0]*dim[1]*dim[2] * mVoxelCount);
+            BaseT::start("Uniform scattering with fixed point density");
+            mTargetPointCount = Index64(mPointsPerVolume*dim[0]*dim[1]*dim[2])*mVoxelCount;
+        } else if (mTargetPointCount>0) {
+            BaseT::start("Uniform scattering with fixed point count");
+            mPointsPerVolume = mTargetPointCount/float(dim[0]*dim[1]*dim[2] * mVoxelCount);
         } else {
-            return;
+            return false;
         }
-        openvdb::CoordBBox bbox;
-        /// build sorted multi-map of random voxel-ids to contain a point
-        std::multiset<openvdb::Index64> mVoxelSet;
-        const double maxId = static_cast<double>(voxelId);
-        for (int i=0, chunks=100000; i<mPointCount; i += chunks) {
-            if (util::wasInterrupted(mInterrupter)) return;
-            /// @todo Multi-thread the generation of mVoxelSet
-            for (int j=i, end=std::min(i+chunks, mPointCount); j<end; ++j) {
-                mVoxelSet.insert(openvdb::Index64(math::Round(maxId*getRand())));
-            }
-        }
-        std::multiset<openvdb::Index64>::iterator voxelIter =
-            mVoxelSet.begin(), voxelEnd = mVoxelSet.end();
+
+        boost::scoped_array<Index64> list(new Index64[mTargetPointCount]);
+        math::RandInt<Index64, RandomGenerator> rand(BaseT::mRand01.engine(), 0, mVoxelCount-1);
+        for (Index64 i=0; i<mTargetPointCount; ++i) list[i] = rand();
+        tbb::parallel_sort(list.get(), list.get() + mTargetPointCount);
+
+        CoordBBox bbox;
+        const Vec3R offset(0.5, 0.5, 0.5);
         typename GridT::ValueOnCIter valueIter = grid.cbeginValueOn();
-        mPointCount = 0;//addPoint increments this counter
-        size_t interruptCount = 0;
-        for (openvdb::Index64 n=valueIter.getVoxelCount(); voxelIter != voxelEnd; ++voxelIter) {
-            //only check interrupter for every 32'th particle
-            if (!(interruptCount++ & (1<<5)-1) && util::wasInterrupted(mInterrupter)) return;
-            while ( n <= *voxelIter ) {
+        for (Index64 i=0, n=valueIter.getVoxelCount() ; i != mTargetPointCount; ++i) {
+            if (BaseT::interrupt()) return false;
+            const Index64 voxelId = list[i];
+            while ( n <= voxelId ) {
                 ++valueIter;
                 n += valueIter.getVoxelCount();
             }
-            if (valueIter.isVoxelValue()) {// a majorty is expected to be voxels
-                const openvdb::Coord min = valueIter.getCoord();
-                const openvdb::Vec3R dmin(min.x()-0.5, min.y()-0.5, min.z()-0.5);
-                this->addPoint(grid, dmin);
+            if (valueIter.isVoxelValue()) {// a majority is expected to be voxels
+                BaseT::addPoint(grid, valueIter.getCoord() - offset);
             } else {// tiles contain multiple (virtual) voxels
                 valueIter.getBoundingBox(bbox);
-                const openvdb::Coord size(bbox.extents());
-                const openvdb::Vec3R dmin(bbox.min().x()-0.5,
-                                          bbox.min().y()-0.5,
-                                          bbox.min().z()-0.5);
-                this->addPoint(grid, dmin, size);
+                BaseT::addPoint(grid, bbox.min() - offset, bbox.extents());
             }
-        }
-        if (mInterrupter) mInterrupter->end();
+        }//loop over all the active voxels and tiles
+
+        BaseT::end();
+        return true;
     }
 
     // The following methods should only be called after the
@@ -177,143 +189,242 @@ public:
            << mPointsPerVolume << " points per volume." << std::endl;
     }
 
-    int getPointCount() const { return mPointCount; }
-    float getPointsPerVolume() const { return mPointsPerVolume; }
-    openvdb::Index64 getVoxelCount() const { return mVoxelCount; }
+    float   getPointsPerVolume()  const { return mPointsPerVolume; }
+    Index64 getTargetPointCount() const { return mTargetPointCount; }
 
 private:
-    PointAccessorType&        mPoints;
-    InterruptType*            mInterrupter;
-    int                       mPointCount;
-    float                     mPointsPerVolume;
-    openvdb::Index64          mVoxelCount;
-    RandomGenerator&          mRandomGen;
-    boost::uniform_01<double> mRandom;
 
-    double getRand() { return mRandom(mRandomGen); }
+    using BaseT::mPointCount;
+    using BaseT::mVoxelCount;
+    Index64 mTargetPointCount;
+    float mPointsPerVolume;
 
-    template <typename GridT>
-    inline void addPoint(const GridT &grid, const openvdb::Vec3R &pos, const openvdb::Vec3R &delta)
-    {
-        mPoints.add(grid.indexToWorld(pos + delta));
-        ++mPointCount;
-    }
-    template <typename GridT>
-    inline void addPoint(const GridT &grid, const openvdb::Vec3R &dmin)
-    {
-        this->addPoint(grid, dmin, openvdb::Vec3R(getRand(),getRand(),getRand()));
-    }
-    template <typename GridT>
-    inline void addPoint(const GridT &grid, const openvdb::Vec3R &dmin, const openvdb::Coord &size)
-    {
-        const openvdb::Vec3R d(size.x()*getRand(),size.y()*getRand(),size.z()*getRand());
-        this->addPoint(grid, dmin, d);
-    }
 }; // class UniformPointScatter
 
-
-/// @brief Non-uniform scatters of point in the active voxels.
-/// The local point count is implicitly defined as a product of
-/// of a global density and the local voxel (or tile) value.
-///
-/// @note This scattering technique can be significantly slower
-/// than a uniform scattering since its computational complexity
-/// is proportional to the active voxel (and tile) count.
+/// @brief Scatters a fixed (and integer) number of points in all
+/// active voxels and tiles.
 template<typename PointAccessorType,
          typename RandomGenerator,
-         typename InterruptType = openvdb::util::NullInterrupter>
-class NonUniformPointScatter
+         typename InterruptType = util::NullInterrupter>
+class DenseUniformPointScatter : public BasePointScatter<PointAccessorType,
+                                                         RandomGenerator,
+                                                         InterruptType>
 {
 public:
-    NonUniformPointScatter(PointAccessorType& points,
-                           float pointsPerVolume,
-                           RandomGenerator& randGen,
-                           InterruptType* interrupt = NULL):
-        mPoints(points),
-        mInterrupter(interrupt),
-        mPointCount(0),
-        mPointsPerVolume(pointsPerVolume),//note this is NOT the local point density
-        mVoxelCount(0),
-        mRandomGen(randGen)
+    typedef BasePointScatter<PointAccessorType, RandomGenerator, InterruptType> BaseT;
+
+    DenseUniformPointScatter(PointAccessorType& points,
+                             float pointsPerVoxel,
+                             RandomGenerator& randGen,
+                             InterruptType* interrupt = NULL)
+        : BaseT(points, randGen, interrupt)
+        , mPointsPerVoxel(pointsPerVoxel)
     {
     }
 
     /// This is the main functor method implementing the actual scattering of points.
     template<typename GridT>
-    void operator()(const GridT& grid)
+    bool operator()(const GridT& grid)
     {
+        typedef typename GridT::ValueOnCIter ValueIter;
+        if (mPointsPerVoxel < 1.0e-6) return false;
         mVoxelCount = grid.activeVoxelCount();
-        if (mVoxelCount == 0) return;//throw std::runtime_error("No voxels in which to scatter points!");
-        if (mInterrupter) mInterrupter->start("Non-uniform scattering with local point density");
-        const openvdb::Vec3d dim = grid.voxelSize();
-        const double volumePerVoxel = dim[0]*dim[1]*dim[2],
-                     pointsPerVoxel = mPointsPerVolume * volumePerVoxel;
-        openvdb::CoordBBox bbox;
-        size_t interruptCount = 0;
-        for (typename GridT::ValueOnCIter iter = grid.cbeginValueOn(); iter; ++iter) {
-            //only check interrupter for every 32'th active value
-            if (!(interruptCount++ & (1<<5)-1) && util::wasInterrupted(mInterrupter)) return;
-            const double d = (*iter) * pointsPerVoxel * iter.getVoxelCount();
-            const int n = int(d);
-            if (iter.isVoxelValue()) { // a majorty is expected to be voxels
-                const openvdb::Coord min = iter.getCoord();
-                const openvdb::Vec3R dmin(min.x()-0.5, min.y()-0.5, min.z()-0.5);
-                for (int i = 0; i < n; ++i) this->addPoint(grid, dmin);
-                if (getRand() < (d - n)) this->addPoint(grid, dmin);
-            } else { // tiles contain multiple (virtual) voxels
+        if (mVoxelCount == 0) return false;
+        BaseT::start("Dense uniform scattering with fixed point count");
+        CoordBBox bbox;
+        const Vec3R offset(0.5, 0.5, 0.5);
+
+        const int ppv = math::Floor(mPointsPerVoxel);
+        const double delta = mPointsPerVoxel - ppv;
+        const bool fractional = !math::isApproxZero(delta, 1.0e-6);
+
+        for (ValueIter iter = grid.cbeginValueOn(); iter; ++iter) {
+            if (BaseT::interrupt()) return false;
+            if (iter.isVoxelValue()) {// a majority is expected to be voxels
+                const Vec3R dmin = iter.getCoord() - offset;
+                for (int n = 0; n != ppv; ++n) BaseT::addPoint(grid, dmin);
+                if (fractional && BaseT::getRand() < delta) BaseT::addPoint(grid, dmin);
+            } else {// tiles contain multiple (virtual) voxels
                 iter.getBoundingBox(bbox);
-                const openvdb::Coord size(bbox.extents());
-                const openvdb::Vec3R dmin(bbox.min().x()-0.5,
-                                          bbox.min().y()-0.5,
-                                          bbox.min().z()-0.5);
-                for (int i = 0; i < n; ++i) this->addPoint(grid, dmin, size);
-                if (getRand() < (d - n)) this->addPoint(grid, dmin, size);
+                const Coord size(bbox.extents());
+                const Vec3R dmin = bbox.min() - offset;
+                const double d = mPointsPerVoxel * iter.getVoxelCount();
+                const int m = math::Floor(d);
+                for (int n = 0; n != m; ++n)  BaseT::addPoint(grid, dmin, size);
+                if (BaseT::getRand() < d - m) BaseT::addPoint(grid, dmin, size);
             }
-        }//loop over the active values
-        if (mInterrupter) mInterrupter->end();
+        }//loop over all the active voxels and tiles
+
+        BaseT::end();
+        return true;
     }
 
     // The following methods should only be called after the
     // the operator() method was called
     void print(const std::string &name, std::ostream& os = std::cout) const
     {
-        os << "Non-uniformely scattered " << mPointCount << " points into " << mVoxelCount
+        os << "Dense uniformly scattered " << mPointCount << " points into " << mVoxelCount
+           << " active voxels in \"" << name << "\" corresponding to "
+           << mPointsPerVoxel << " points per voxel." << std::endl;
+    }
+
+    float getPointsPerVoxel() const { return mPointsPerVoxel; }
+
+private:
+    using BaseT::mPointCount;
+    using BaseT::mVoxelCount;
+    float mPointsPerVoxel;
+}; // class DenseUniformPointScatter
+
+/// @brief Non-uniform scatters of point in the active voxels.
+/// The local point count is implicitly defined as a product of
+/// of a global density (called pointsPerVolume) and the local voxel
+/// (or tile) value.
+///
+/// @note This scattering technique can be significantly slower
+/// than a uniform scattering since its computational complexity
+/// is proportional to the active voxel (and tile) count.
+template<typename PointAccessorType,
+         typename RandomGenerator,
+         typename InterruptType = util::NullInterrupter>
+class NonUniformPointScatter : public BasePointScatter<PointAccessorType,
+                                                       RandomGenerator,
+                                                       InterruptType>
+{
+public:
+    typedef BasePointScatter<PointAccessorType, RandomGenerator, InterruptType> BaseT;
+
+    NonUniformPointScatter(PointAccessorType& points,
+                           float pointsPerVolume,
+                           RandomGenerator& randGen,
+                           InterruptType* interrupt = NULL)
+        : BaseT(points, randGen, interrupt)
+        , mPointsPerVolume(pointsPerVolume)//note this is merely a
+                                           //multiplier for the local point density
+    {
+    }
+
+    /// This is the main functor method implementing the actual scattering of points.
+    template<typename GridT>
+    bool operator()(const GridT& grid)
+    {
+        if (mPointsPerVolume <= 0.0f) return false;
+        mVoxelCount = grid.activeVoxelCount();
+        if (mVoxelCount == 0) return false;
+        BaseT::start("Non-uniform scattering with local point density");
+        const Vec3d dim = grid.voxelSize();
+        const double volumePerVoxel = dim[0]*dim[1]*dim[2],
+                     pointsPerVoxel = mPointsPerVolume * volumePerVoxel;
+        CoordBBox bbox;
+        const Vec3R offset(0.5, 0.5, 0.5);
+        for (typename GridT::ValueOnCIter iter = grid.cbeginValueOn(); iter; ++iter) {
+            if (BaseT::interrupt()) return false;
+            const double d = (*iter) * pointsPerVoxel * iter.getVoxelCount();
+            const int n = int(d);
+            if (iter.isVoxelValue()) { // a majority is expected to be voxels
+                const Vec3R dmin =iter.getCoord() - offset;
+                for (int i = 0; i < n; ++i) BaseT::addPoint(grid, dmin);
+                if (BaseT::getRand() < (d - n)) BaseT::addPoint(grid, dmin);
+            } else { // tiles contain multiple (virtual) voxels
+                iter.getBoundingBox(bbox);
+                const Coord size(bbox.extents());
+                const Vec3R dmin = bbox.min() - offset;
+                for (int i = 0; i < n; ++i) BaseT::addPoint(grid, dmin, size);
+                if (BaseT::getRand() < (d - n)) BaseT::addPoint(grid, dmin, size);
+            }
+        }//loop over all the active voxels and tiles
+        BaseT::end();
+        return true;
+    }
+
+    // The following methods should only be called after the
+    // the operator() method was called
+    void print(const std::string &name, std::ostream& os = std::cout) const
+    {
+        os << "Non-uniformly scattered " << mPointCount << " points into " << mVoxelCount
            << " active voxels in \"" << name << "\"." << std::endl;
     }
 
-    int   getPointCount() const { return mPointCount; }
-    openvdb::Index64  getVoxelCount() const { return mVoxelCount; }
-    
+    float getPointPerVolume() const { return mPointsPerVolume; }
+
 private:
+    using BaseT::mPointCount;
+    using BaseT::mVoxelCount;
+    float mPointsPerVolume;
+
+}; // class NonUniformPointScatter
+
+/// Base class of all the point scattering classes defined above
+template<typename PointAccessorType,
+         typename RandomGenerator,
+         typename InterruptType>
+class BasePointScatter
+{
+public:
+
+    Index64 getPointCount() const { return mPointCount; }
+    Index64 getVoxelCount() const { return mVoxelCount; }
+
+protected:
+
+    /// This is a base class so the constructor is protected
+    BasePointScatter(PointAccessorType& points,
+                     RandomGenerator& randGen,
+                     InterruptType* interrupt = NULL)
+        : mPoints(points)
+        , mInterrupter(interrupt)
+        , mPointCount(0)
+        , mVoxelCount(0)
+        , mInterruptCount(0)
+        , mRand01(randGen)
+    {
+    }
+
     PointAccessorType&        mPoints;
     InterruptType*            mInterrupter;
-    int                       mPointCount;
-    float                     mPointsPerVolume;
-    openvdb::Index64          mVoxelCount;
-    RandomGenerator&          mRandomGen;
-    boost::uniform_01<double> mRandom;
+    Index64                   mPointCount;
+    Index64                   mVoxelCount;
+    Index64                   mInterruptCount;
+    math::Rand01<double, RandomGenerator> mRand01;
 
-    double getRand() { return mRandom(mRandomGen); }
+    inline void start(const char* name)
+    {
+        if (mInterrupter) mInterrupter->start(name);
+    }
+
+    inline void end()
+    {
+        if (mInterrupter) mInterrupter->end();
+    }
+
+    inline bool interrupt()
+    {
+        //only check interrupter for every 32'th call
+        return !(mInterruptCount++ & ((1<<5)-1)) && util::wasInterrupted(mInterrupter);
+    }
+
+    inline double getRand() { return mRand01(); }
 
     template <typename GridT>
-    inline void addPoint(const GridT &grid, const openvdb::Vec3R &pos, const openvdb::Vec3R &delta)
+    inline void addPoint(const GridT &grid, const Vec3R &dmin)
     {
-        mPoints.add(grid.indexToWorld(pos + delta));
+        const Vec3R pos(dmin[0] + this->getRand(),
+                        dmin[1] + this->getRand(),
+                        dmin[2] + this->getRand());
+        mPoints.add(grid.indexToWorld(pos));
         ++mPointCount;
     }
+
     template <typename GridT>
-    inline void addPoint(const GridT &grid, const openvdb::Vec3R &dmin)
+    inline void addPoint(const GridT &grid, const Vec3R &dmin, const Coord &size)
     {
-        this->addPoint(grid, dmin, openvdb::Vec3R(getRand(),getRand(),getRand()));
+        const Vec3R pos(dmin[0] + size[0]*this->getRand(),
+                        dmin[1] + size[1]*this->getRand(),
+                        dmin[2] + size[2]*this->getRand());
+        mPoints.add(grid.indexToWorld(pos));
+        ++mPointCount;
     }
-    template <typename GridT>
-    inline void addPoint(const GridT &grid, const openvdb::Vec3R &dmin, const openvdb::Coord &size)
-    {
-        const openvdb::Vec3R d(size.x()*getRand(),size.y()*getRand(),size.z()*getRand());
-        this->addPoint(grid, dmin, d);
-    }
-    
-}; // class NonUniformPointScatter
+};// class BasePointScatter
 
 } // namespace tools
 } // namespace OPENVDB_VERSION_NAME
@@ -321,6 +432,6 @@ private:
 
 #endif // OPENVDB_TOOLS_POINT_SCATTER_HAS_BEEN_INCLUDED
 
-// Copyright (c) 2012-2013 DreamWorks Animation LLC
+// Copyright (c) 2012-2015 DreamWorks Animation LLC
 // All rights reserved. This software is distributed under the
 // Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )

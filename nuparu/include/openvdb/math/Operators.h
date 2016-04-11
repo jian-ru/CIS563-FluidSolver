@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////
 //
-// Copyright (c) 2012-2013 DreamWorks Animation LLC
+// Copyright (c) 2012-2015 DreamWorks Animation LLC
 //
 // All rights reserved. This software is distributed under the
 // Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )
@@ -153,9 +153,9 @@ struct BIAS_SCHEME {
     static const DScheme FD = FD_1ST;
     static const DScheme BD = BD_1ST;
 
-    template<typename GridType>
+    template<typename GridType, bool IsSafe = true>
     struct ISStencil {
-        typedef SevenPointStencil<GridType>  StencilType;
+        typedef SevenPointStencil<GridType, IsSafe>  StencilType;
     };
 };
 
@@ -164,9 +164,9 @@ template<> struct BIAS_SCHEME<FIRST_BIAS>
     static const DScheme FD = FD_1ST;
     static const DScheme BD = BD_1ST;
 
-    template<typename GridType>
+    template<typename GridType, bool IsSafe = true>
     struct ISStencil {
-        typedef SevenPointStencil<GridType>  StencilType;
+        typedef SevenPointStencil<GridType, IsSafe>  StencilType;
     };
 };
 
@@ -175,9 +175,9 @@ template<> struct BIAS_SCHEME<SECOND_BIAS>
     static const DScheme FD = FD_2ND;
     static const DScheme BD = BD_2ND;
 
-    template<typename GridType>
+    template<typename GridType, bool IsSafe = true>
     struct ISStencil {
-        typedef ThirteenPointStencil<GridType>  StencilType;
+        typedef ThirteenPointStencil<GridType, IsSafe>  StencilType;
       };
 };
 template<> struct BIAS_SCHEME<THIRD_BIAS>
@@ -185,9 +185,9 @@ template<> struct BIAS_SCHEME<THIRD_BIAS>
     static const DScheme FD = FD_3RD;
     static const DScheme BD = BD_3RD;
 
-    template<typename GridType>
+    template<typename GridType, bool IsSafe = true>
     struct ISStencil {
-        typedef NineteenPointStencil<GridType>  StencilType;
+        typedef NineteenPointStencil<GridType, IsSafe>  StencilType;
     };
 };
 template<> struct BIAS_SCHEME<WENO5_BIAS>
@@ -195,9 +195,9 @@ template<> struct BIAS_SCHEME<WENO5_BIAS>
     static const DScheme FD = FD_WENO5;
     static const DScheme BD = BD_WENO5;
 
-    template<typename GridType>
+    template<typename GridType, bool IsSafe = true>
     struct ISStencil {
-        typedef NineteenPointStencil<GridType>  StencilType;
+        typedef NineteenPointStencil<GridType, IsSafe>  StencilType;
     };
 };
 template<> struct BIAS_SCHEME<HJWENO5_BIAS>
@@ -205,9 +205,9 @@ template<> struct BIAS_SCHEME<HJWENO5_BIAS>
     static const DScheme FD = FD_HJWENO5;
     static const DScheme BD = BD_HJWENO5;
 
-    template<typename GridType>
+    template<typename GridType, bool IsSafe = true>
     struct ISStencil {
-        typedef NineteenPointStencil<GridType>  StencilType;
+        typedef NineteenPointStencil<GridType, IsSafe>  StencilType;
     };
 };
 
@@ -222,7 +222,8 @@ struct ISGradientBiased
     static const DScheme BD = BIAS_SCHEME<GradScheme>::BD;
 
     // random access version
-    template<typename Accessor> static Vec3<typename Accessor::ValueType>
+    template<typename Accessor>
+    static Vec3<typename Accessor::ValueType>
     result(const Accessor& grid, const Coord& ijk, const Vec3Bias& V)
     {
         typedef typename Accessor::ValueType ValueType;
@@ -234,11 +235,12 @@ struct ISGradientBiased
     }
 
     // stencil access version
-    template<typename StencilT> static Vec3<typename StencilT::ValueType>
+    template<typename StencilT>
+    static Vec3<typename StencilT::ValueType>
     result(const StencilT& stencil, const Vec3Bias& V)
     {
         typedef typename StencilT::ValueType  ValueType;
-        typedef Vec3<ValueType>              Vec3Type;
+        typedef Vec3<ValueType>               Vec3Type;
 
         return Vec3Type(V[0]<0 ? D1<FD>::inX(stencil) : D1<BD>::inX(stencil),
                         V[1]<0 ? D1<FD>::inY(stencil) : D1<BD>::inY(stencil),
@@ -272,7 +274,7 @@ struct ISGradientNormSqrd
     static typename StencilT::ValueType
     result(const StencilT& stencil)
     {
-        typedef typename StencilT::ValueType      ValueType;
+        typedef typename StencilT::ValueType     ValueType;
         typedef math::Vec3<ValueType>            Vec3Type;
 
         Vec3Type up   = ISGradient<FD>::result(stencil);
@@ -287,29 +289,39 @@ struct ISGradientNormSqrd<HJWENO5_BIAS>
 {
     // random access version
     template<typename Accessor>
-    static typename Accessor::ValueType
-    result(const Accessor& grid, const Coord& ijk)
+    static typename Accessor::ValueType result(const Accessor& grid, const Coord& ijk)
     {
+        struct GetValue
+        {
+            const Accessor& acc;
+            GetValue(const Accessor& acc_): acc(acc_) {}
+            // Return the grid value at ijk converted to simd::Float4::value_type (= float).
+            inline simd::Float4::value_type operator()(const Coord& ijk_) {
+                return static_cast<simd::Float4::value_type>(acc.getValue(ijk_));
+            }
+        }
+        valueAt(grid);
+
         // SSE optimized
         const simd::Float4
-            v1(grid.getValue(ijk.offsetBy(-2, 0, 0)) - grid.getValue(ijk.offsetBy(-3, 0, 0)),
-               grid.getValue(ijk.offsetBy( 0,-2, 0)) - grid.getValue(ijk.offsetBy( 0,-3, 0)),
-               grid.getValue(ijk.offsetBy( 0, 0,-2)) - grid.getValue(ijk.offsetBy( 0, 0,-3)), 0),
-            v2(grid.getValue(ijk.offsetBy(-1, 0, 0)) - grid.getValue(ijk.offsetBy(-2, 0, 0)),
-               grid.getValue(ijk.offsetBy( 0,-1, 0)) - grid.getValue(ijk.offsetBy( 0,-2, 0)),
-               grid.getValue(ijk.offsetBy( 0, 0,-1)) - grid.getValue(ijk.offsetBy( 0, 0,-2)), 0),
-            v3(grid.getValue(ijk                   ) - grid.getValue(ijk.offsetBy(-1, 0, 0)),
-               grid.getValue(ijk                   ) - grid.getValue(ijk.offsetBy( 0,-1, 0)),
-               grid.getValue(ijk                   ) - grid.getValue(ijk.offsetBy( 0, 0,-1)), 0),
-            v4(grid.getValue(ijk.offsetBy( 1, 0, 0)) - grid.getValue(ijk                   ),
-               grid.getValue(ijk.offsetBy( 0, 1, 0)) - grid.getValue(ijk                   ),
-               grid.getValue(ijk.offsetBy( 0, 0, 1)) - grid.getValue(ijk                   ), 0),
-            v5(grid.getValue(ijk.offsetBy( 2, 0, 0)) - grid.getValue(ijk.offsetBy( 1, 0, 0)),
-               grid.getValue(ijk.offsetBy( 0, 2, 0)) - grid.getValue(ijk.offsetBy( 0, 1, 0)),
-               grid.getValue(ijk.offsetBy( 0, 0, 2)) - grid.getValue(ijk.offsetBy( 0, 0, 1)), 0),
-            v6(grid.getValue(ijk.offsetBy( 3, 0, 0)) - grid.getValue(ijk.offsetBy( 2, 0, 0)),
-               grid.getValue(ijk.offsetBy( 0, 3, 0)) - grid.getValue(ijk.offsetBy( 0, 2, 0)),
-               grid.getValue(ijk.offsetBy( 0, 0, 3)) - grid.getValue(ijk.offsetBy( 0, 0, 2)), 0),
+            v1(valueAt(ijk.offsetBy(-2, 0, 0)) - valueAt(ijk.offsetBy(-3, 0, 0)),
+               valueAt(ijk.offsetBy( 0,-2, 0)) - valueAt(ijk.offsetBy( 0,-3, 0)),
+               valueAt(ijk.offsetBy( 0, 0,-2)) - valueAt(ijk.offsetBy( 0, 0,-3)), 0),
+            v2(valueAt(ijk.offsetBy(-1, 0, 0)) - valueAt(ijk.offsetBy(-2, 0, 0)),
+               valueAt(ijk.offsetBy( 0,-1, 0)) - valueAt(ijk.offsetBy( 0,-2, 0)),
+               valueAt(ijk.offsetBy( 0, 0,-1)) - valueAt(ijk.offsetBy( 0, 0,-2)), 0),
+            v3(valueAt(ijk                   ) - valueAt(ijk.offsetBy(-1, 0, 0)),
+               valueAt(ijk                   ) - valueAt(ijk.offsetBy( 0,-1, 0)),
+               valueAt(ijk                   ) - valueAt(ijk.offsetBy( 0, 0,-1)), 0),
+            v4(valueAt(ijk.offsetBy( 1, 0, 0)) - valueAt(ijk                   ),
+               valueAt(ijk.offsetBy( 0, 1, 0)) - valueAt(ijk                   ),
+               valueAt(ijk.offsetBy( 0, 0, 1)) - valueAt(ijk                   ), 0),
+            v5(valueAt(ijk.offsetBy( 2, 0, 0)) - valueAt(ijk.offsetBy( 1, 0, 0)),
+               valueAt(ijk.offsetBy( 0, 2, 0)) - valueAt(ijk.offsetBy( 0, 1, 0)),
+               valueAt(ijk.offsetBy( 0, 0, 2)) - valueAt(ijk.offsetBy( 0, 0, 1)), 0),
+            v6(valueAt(ijk.offsetBy( 3, 0, 0)) - valueAt(ijk.offsetBy( 2, 0, 0)),
+               valueAt(ijk.offsetBy( 0, 3, 0)) - valueAt(ijk.offsetBy( 0, 2, 0)),
+               valueAt(ijk.offsetBy( 0, 0, 3)) - valueAt(ijk.offsetBy( 0, 0, 2)), 0),
             down = math::WENO5(v1, v2, v3, v4, v5),
             up   = math::WENO5(v6, v5, v4, v3, v2);
 
@@ -318,29 +330,30 @@ struct ISGradientNormSqrd<HJWENO5_BIAS>
 
     // stencil access version
     template<typename StencilT>
-    static typename StencilT::ValueType
-    result(const StencilT& s)
+    static typename StencilT::ValueType result(const StencilT& s)
     {
+        typedef simd::Float4::value_type F4Val;
+
         // SSE optimized
         const simd::Float4
-            v1(s.template getValue<-2, 0, 0>() - s.template getValue<-3, 0, 0>(),
-               s.template getValue< 0,-2, 0>() - s.template getValue< 0,-3, 0>(),
-               s.template getValue< 0, 0,-2>() - s.template getValue< 0, 0,-3>(), 0),
-            v2(s.template getValue<-1, 0, 0>() - s.template getValue<-2, 0, 0>(),
-               s.template getValue< 0,-1, 0>() - s.template getValue< 0,-2, 0>(),
-               s.template getValue< 0, 0,-1>() - s.template getValue< 0, 0,-2>(), 0),
-            v3(s.template getValue< 0, 0, 0>() - s.template getValue<-1, 0, 0>(),
-               s.template getValue< 0, 0, 0>() - s.template getValue< 0,-1, 0>(),
-               s.template getValue< 0, 0, 0>() - s.template getValue< 0, 0,-1>(), 0),
-            v4(s.template getValue< 1, 0, 0>() - s.template getValue< 0, 0, 0>(),
-               s.template getValue< 0, 1, 0>() - s.template getValue< 0, 0, 0>(),
-               s.template getValue< 0, 0, 1>() - s.template getValue< 0, 0, 0>(), 0),
-            v5(s.template getValue< 2, 0, 0>() - s.template getValue< 1, 0, 0>(),
-               s.template getValue< 0, 2, 0>() - s.template getValue< 0, 1, 0>(),
-               s.template getValue< 0, 0, 2>() - s.template getValue< 0, 0, 1>(), 0),
-            v6(s.template getValue< 3, 0, 0>() - s.template getValue< 2, 0, 0>(),
-               s.template getValue< 0, 3, 0>() - s.template getValue< 0, 2, 0>(),
-               s.template getValue< 0, 0, 3>() - s.template getValue< 0, 0, 2>(), 0),
+            v1(F4Val(s.template getValue<-2, 0, 0>()) - F4Val(s.template getValue<-3, 0, 0>()),
+               F4Val(s.template getValue< 0,-2, 0>()) - F4Val(s.template getValue< 0,-3, 0>()),
+               F4Val(s.template getValue< 0, 0,-2>()) - F4Val(s.template getValue< 0, 0,-3>()), 0),
+            v2(F4Val(s.template getValue<-1, 0, 0>()) - F4Val(s.template getValue<-2, 0, 0>()),
+               F4Val(s.template getValue< 0,-1, 0>()) - F4Val(s.template getValue< 0,-2, 0>()),
+               F4Val(s.template getValue< 0, 0,-1>()) - F4Val(s.template getValue< 0, 0,-2>()), 0),
+            v3(F4Val(s.template getValue< 0, 0, 0>()) - F4Val(s.template getValue<-1, 0, 0>()),
+               F4Val(s.template getValue< 0, 0, 0>()) - F4Val(s.template getValue< 0,-1, 0>()),
+               F4Val(s.template getValue< 0, 0, 0>()) - F4Val(s.template getValue< 0, 0,-1>()), 0),
+            v4(F4Val(s.template getValue< 1, 0, 0>()) - F4Val(s.template getValue< 0, 0, 0>()),
+               F4Val(s.template getValue< 0, 1, 0>()) - F4Val(s.template getValue< 0, 0, 0>()),
+               F4Val(s.template getValue< 0, 0, 1>()) - F4Val(s.template getValue< 0, 0, 0>()), 0),
+            v5(F4Val(s.template getValue< 2, 0, 0>()) - F4Val(s.template getValue< 1, 0, 0>()),
+               F4Val(s.template getValue< 0, 2, 0>()) - F4Val(s.template getValue< 0, 1, 0>()),
+               F4Val(s.template getValue< 0, 0, 2>()) - F4Val(s.template getValue< 0, 0, 1>()), 0),
+            v6(F4Val(s.template getValue< 3, 0, 0>()) - F4Val(s.template getValue< 2, 0, 0>()),
+               F4Val(s.template getValue< 0, 3, 0>()) - F4Val(s.template getValue< 0, 2, 0>()),
+               F4Val(s.template getValue< 0, 0, 3>()) - F4Val(s.template getValue< 0, 0, 2>()), 0),
             down = math::WENO5(v1, v2, v3, v4, v5),
             up   = math::WENO5(v6, v5, v4, v3, v2);
 
@@ -397,7 +410,9 @@ struct ISLaplacian<CD_FOURTH>
     template<typename Accessor>
     static typename Accessor::ValueType result(const Accessor& grid, const Coord& ijk)
     {
-        return (-1./12.)*(
+        typedef typename Accessor::ValueType ValueT;
+        return static_cast<ValueT>(
+            (-1./12.)*(
                 grid.getValue(ijk.offsetBy(2,0,0)) + grid.getValue(ijk.offsetBy(-2, 0, 0)) +
                 grid.getValue(ijk.offsetBy(0,2,0)) + grid.getValue(ijk.offsetBy( 0,-2, 0)) +
                 grid.getValue(ijk.offsetBy(0,0,2)) + grid.getValue(ijk.offsetBy( 0, 0,-2)) )
@@ -405,14 +420,16 @@ struct ISLaplacian<CD_FOURTH>
                 grid.getValue(ijk.offsetBy(1,0,0)) + grid.getValue(ijk.offsetBy(-1, 0, 0)) +
                 grid.getValue(ijk.offsetBy(0,1,0)) + grid.getValue(ijk.offsetBy( 0,-1, 0)) +
                 grid.getValue(ijk.offsetBy(0,0,1)) + grid.getValue(ijk.offsetBy( 0, 0,-1)) )
-            - 7.5*grid.getValue(ijk);
+            - 7.5*grid.getValue(ijk));
     }
 
     // stencil access version
     template<typename StencilT>
     static typename StencilT::ValueType result(const StencilT& stencil)
     {
-        return (-1./12.)*(
+        typedef typename StencilT::ValueType ValueT;
+        return static_cast<ValueT>(
+            (-1./12.)*(
                 stencil.template getValue< 2, 0, 0>() + stencil.template getValue<-2, 0, 0>() +
                 stencil.template getValue< 0, 2, 0>() + stencil.template getValue< 0,-2, 0>() +
                 stencil.template getValue< 0, 0, 2>() + stencil.template getValue< 0, 0,-2>() )
@@ -420,7 +437,7 @@ struct ISLaplacian<CD_FOURTH>
                 stencil.template getValue< 1, 0, 0>() + stencil.template getValue<-1, 0, 0>() +
                 stencil.template getValue< 0, 1, 0>() + stencil.template getValue< 0,-1, 0>() +
                 stencil.template getValue< 0, 0, 1>() + stencil.template getValue< 0, 0,-1>() )
-            - 7.5*stencil.template getValue< 0, 0, 0>();
+            - 7.5*stencil.template getValue< 0, 0, 0>());
     }
 };
 
@@ -431,7 +448,9 @@ struct ISLaplacian<CD_SIXTH>
     template<typename Accessor>
     static typename Accessor::ValueType result(const Accessor& grid, const Coord& ijk)
     {
-        return (1./90.)*(
+        typedef typename Accessor::ValueType ValueT;
+        return static_cast<ValueT>(
+            (1./90.)*(
                 grid.getValue(ijk.offsetBy(3,0,0)) + grid.getValue(ijk.offsetBy(-3, 0, 0)) +
                 grid.getValue(ijk.offsetBy(0,3,0)) + grid.getValue(ijk.offsetBy( 0,-3, 0)) +
                 grid.getValue(ijk.offsetBy(0,0,3)) + grid.getValue(ijk.offsetBy( 0, 0,-3)) )
@@ -443,14 +462,16 @@ struct ISLaplacian<CD_SIXTH>
                 grid.getValue(ijk.offsetBy(1,0,0)) + grid.getValue(ijk.offsetBy(-1, 0, 0)) +
                 grid.getValue(ijk.offsetBy(0,1,0)) + grid.getValue(ijk.offsetBy( 0,-1, 0)) +
                 grid.getValue(ijk.offsetBy(0,0,1)) + grid.getValue(ijk.offsetBy( 0, 0,-1)) )
-            - (3*49/18.)*grid.getValue(ijk);
+            - (3*49/18.)*grid.getValue(ijk));
     }
 
     // stencil access version
     template<typename StencilT>
     static typename StencilT::ValueType result(const StencilT& stencil)
     {
-        return (1./90.)*(
+        typedef typename StencilT::ValueType ValueT;
+        return static_cast<ValueT>(
+            (1./90.)*(
                 stencil.template getValue< 3, 0, 0>() + stencil.template getValue<-3, 0, 0>() +
                 stencil.template getValue< 0, 3, 0>() + stencil.template getValue< 0,-3, 0>() +
                 stencil.template getValue< 0, 0, 3>() + stencil.template getValue< 0, 0,-3>() )
@@ -462,7 +483,7 @@ struct ISLaplacian<CD_SIXTH>
                 stencil.template getValue< 1, 0, 0>() + stencil.template getValue<-1, 0, 0>() +
                 stencil.template getValue< 0, 1, 0>() + stencil.template getValue< 0,-1, 0>() +
                 stencil.template getValue< 0, 0, 1>() + stencil.template getValue< 0, 0,-1>() )
-            - (3*49/18.)*stencil.template getValue< 0, 0, 0>();
+            - (3*49/18.)*stencil.template getValue< 0, 0, 0>());
     }
 };
 //@}
@@ -1425,9 +1446,9 @@ struct Laplacian
             d2_rs = map.applyIJC(d2_is);
         } else {
             // compute the first derivatives with 2nd order accuracy.
-            Vec3d d1_is(D1<CD_2ND>::inX(grid, ijk),
-                        D1<CD_2ND>::inY(grid, ijk),
-                        D1<CD_2ND>::inZ(grid, ijk) );
+            Vec3d d1_is(static_cast<double>(D1<CD_2ND>::inX(grid, ijk)),
+                        static_cast<double>(D1<CD_2ND>::inY(grid, ijk)),
+                        static_cast<double>(D1<CD_2ND>::inZ(grid, ijk)));
 
             d2_rs = map.applyIJC(d2_is, d1_is, ijk.asVec3d());
         }
@@ -1740,9 +1761,9 @@ struct MeanCurvature
         typedef typename Accessor::ValueType ValueType;
 
          // compute the gradient in index and world space
-         Vec3d d1_is(D1<DiffScheme1>::inX(grid, ijk),
-                     D1<DiffScheme1>::inY(grid, ijk),
-                     D1<DiffScheme1>::inZ(grid, ijk)), d1_ws;
+         Vec3d d1_is(static_cast<double>(D1<DiffScheme1>::inX(grid, ijk)),
+                     static_cast<double>(D1<DiffScheme1>::inY(grid, ijk)),
+                     static_cast<double>(D1<DiffScheme1>::inZ(grid, ijk))), d1_ws;
          if (is_linear<MapType>::value) {//resolved at compiletime
              d1_ws = map.applyIJT(d1_is);
          } else {
@@ -2097,6 +2118,6 @@ private:
 
 #endif // OPENVDB_MATH_OPERATORS_HAS_BEEN_INCLUDED
 
-// Copyright (c) 2012-2013 DreamWorks Animation LLC
+// Copyright (c) 2012-2015 DreamWorks Animation LLC
 // All rights reserved. This software is distributed under the
 // Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )

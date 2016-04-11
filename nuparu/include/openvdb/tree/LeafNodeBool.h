@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////
 //
-// Copyright (c) 2012-2013 DreamWorks Animation LLC
+// Copyright (c) 2012-2015 DreamWorks Animation LLC
 //
 // All rights reserved. This software is distributed under the
 // Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )
@@ -37,10 +37,10 @@
 #include <boost/static_assert.hpp>
 #include <openvdb/Types.h>
 #include <openvdb/io/Compression.h> // for io::readData(), etc.
+#include <openvdb/math/Math.h> // for math::isZero()
 #include <openvdb/util/NodeMasks.h>
 #include "LeafNode.h"
 #include "Iterator.h"
-#include "Util.h"
 
 
 namespace openvdb {
@@ -84,6 +84,8 @@ public:
     class Buffer
     {
     public:
+        typedef typename NodeMaskType::Word WordType;
+        static const Index WORD_COUNT = NodeMaskType::WORD_COUNT;
         Buffer() {}
         Buffer(bool on) : mData(on) {}
         Buffer(const NodeMaskType& other): mData(other) {}
@@ -95,7 +97,9 @@ public:
         const bool& getValue(Index i) const
         {
             assert(i < SIZE);
-            return mData.isOn(i) ? LeafNode::sOn : LeafNode::sOff;
+            // We can't use the ternary operator here, otherwise Visual C++ returns
+            // a reference to a temporary.
+            if (mData.isOn(i)) return LeafNode::sOn; else return LeafNode::sOff;
         }
         const bool& operator[](Index i) const { return this->getValue(i); }
 
@@ -108,6 +112,22 @@ public:
 
         Index memUsage() const { return mData.memUsage(); }
         static Index size() { return SIZE; }
+
+        /// Return a point to the c-style array of words encoding the bits.
+        /// @warning This method should only be used by experts that
+        /// seek low-level optimizations.
+        WordType* data()
+        {
+            return &(mData.template getWord<WordType>(0));
+        }
+        /// Return a const point to the c-style array of words
+        /// encoding the bits.
+        /// @warning This method should only be used by experts that
+        /// seek low-level optimizations.
+        const WordType* data() const
+        {
+            return const_cast<Buffer*>(this)->data();
+        }
 
     private:
         friend class ::TestLeaf;
@@ -126,6 +146,11 @@ public:
     /// @param value   the initial value for all of this node's voxels
     /// @param active  the active state to which to initialize all voxels
     explicit LeafNode(const Coord& xyz, bool value = false, bool active = false);
+
+#ifndef OPENVDB_2_ABI_COMPATIBLE
+    /// "Partial creation" constructor used during file input
+    LeafNode(PartialCreate, const Coord& xyz, bool value = false, bool active = false);
+#endif
 
     /// Deep copy constructor
     LeafNode(const LeafNode&);
@@ -179,6 +204,17 @@ public:
     bool isEmpty() const { return mValueMask.isOff(); }
     /// Return @c true if this node only contains active voxels.
     bool isDense() const { return mValueMask.isOn(); }
+
+#ifndef OPENVDB_2_ABI_COMPATIBLE
+    /// @brief Return @c true if memory for this node's buffer has been allocated.
+    /// @details Currently, boolean leaf nodes don't support partial creation,
+    /// so this always returns @c true.
+    bool isAllocated() const { return true; }
+    /// @brief Allocate memory for this node's buffer if it has not already been allocated.
+    /// @details Currently, boolean leaf nodes don't support partial creation,
+    /// so this has no effect.
+    bool allocate() { return true; }
+#endif
 
     /// Return the memory in bytes occupied by this node.
     Index64 memUsage() const;
@@ -240,6 +276,7 @@ public:
 
     /// Read in the topology and the origin.
     void readBuffers(std::istream&, bool fromHalf = false);
+    void readBuffers(std::istream& is, const CoordBBox&, bool fromHalf = false);
     /// Write out the topology and the origin.
     void writeBuffers(std::ostream&, bool toHalf = false) const;
 
@@ -287,7 +324,7 @@ public:
     /// Set the value of the voxel at the given coordinates and mark the voxel as active.
     void setValueOn(const Coord& xyz, bool val);
     /// Set the value of the voxel at the given coordinates and mark the voxel as active.
-    void setValue(const Coord& xyz, bool val) { this->setValueOn(xyz, val); };
+    void setValue(const Coord& xyz, bool val) { this->setValueOn(xyz, val); }
     /// Set the value of the voxel at the given offset and mark the voxel as active.
     void setValueOn(Index offset, bool val);
 
@@ -316,6 +353,9 @@ public:
 
     /// Return @c false since leaf nodes never contain tiles.
     static bool hasActiveTiles() { return false; }
+
+    /// Set all voxels that lie outside the given axis-aligned box to the background.
+    void clip(const CoordBBox&, bool background);
 
     /// Set all voxels within an axis-aligned box to the specified value and active state.
     void fill(const CoordBBox& bbox, bool value, bool active = true);
@@ -451,7 +491,7 @@ public:
     void merge(const LeafNode& other, bool bg = false, bool otherBG = false);
     template<MergePolicy Policy> void merge(bool tileValue, bool tileActive);
 
-    void voxelizeActiveTiles() {};
+    void voxelizeActiveTiles() {}
 
     /// @brief Union this node's set of active values with the active values
     /// of the other node, whose @c ValueType may be different. So a
@@ -522,12 +562,7 @@ public:
 
     //@{
     /// This function exists only to enable template instantiation.
-    void signedFloodFill(bool) {}
-    /// This function exists only to enable template instantiation.
-    void signedFloodFill(bool, bool) {}
-    template<typename PruneOp> void pruneOp(PruneOp&) {}
     void prune(const ValueType& /*tolerance*/ = zeroVal<ValueType>()) {}
-    void pruneInactive(const ValueType&) {}
     void addLeaf(LeafNode*) {}
     template<typename AccessorT>
     void addLeafAndCache(LeafNode*, AccessorT&) {}
@@ -537,6 +572,8 @@ public:
     NodeT* probeNode(const Coord&) { return NULL; }
     template<typename NodeT>
     const NodeT* probeConstNode(const Coord&) const { return NULL; }
+    template<typename ArrayT> void getNodes(ArrayT&) const {}
+    template<typename ArrayT> void stealNodes(ArrayT&, const ValueType&, bool) {}
     //@}
 
     void addTile(Index level, const Coord&, bool val, bool active);
@@ -799,6 +836,21 @@ LeafNode<bool, Log2Dim>::LeafNode(const Coord& xyz, bool value, bool active):
 }
 
 
+#ifndef OPENVDB_2_ABI_COMPATIBLE
+template<Index Log2Dim>
+inline
+LeafNode<bool, Log2Dim>::LeafNode(PartialCreate, const Coord& xyz, bool value, bool active):
+    mValueMask(active),
+    mBuffer(value),
+    mOrigin(xyz & (~(DIM - 1)))
+{
+    /// @todo For now, this is identical to the non-PartialCreate constructor.
+    /// Consider modifying the Buffer class to allow it to be constructed
+    /// without allocating a bitmask.
+}
+#endif
+
+
 template<Index Log2Dim>
 inline
 LeafNode<bool, Log2Dim>::LeafNode(const LeafNode &other):
@@ -977,6 +1029,24 @@ LeafNode<bool, Log2Dim>::writeTopology(std::ostream& os, bool /*toHalf*/) const
 
 template<Index Log2Dim>
 inline void
+LeafNode<bool, Log2Dim>::readBuffers(std::istream& is, const CoordBBox& clipBBox, bool fromHalf)
+{
+    // Boolean LeafNodes don't currently implement lazy loading.
+    // Instead, load the full buffer, then clip it.
+
+    this->readBuffers(is, fromHalf);
+
+    // Get this tree's background value.
+    bool background = false;
+    if (const void* bgPtr = io::getGridBackgroundValuePtr(is)) {
+        background = *static_cast<const bool*>(bgPtr);
+    }
+    this->clip(clipBBox, background);
+}
+
+
+template<Index Log2Dim>
+inline void
 LeafNode<bool, Log2Dim>::readBuffers(std::istream& is, bool /*fromHalf*/)
 {
     // Read in the value mask.
@@ -1073,9 +1143,8 @@ LeafNode<bool, Log2Dim>::isConstant(bool& constValue, bool& state, bool toleranc
 
 template<Index Log2Dim>
 inline void
-LeafNode<bool, Log2Dim>::addTile(Index level, const Coord& xyz, bool val, bool active)
+LeafNode<bool, Log2Dim>::addTile(Index /*level*/, const Coord& xyz, bool val, bool active)
 {
-    assert(level == 0);
     this->addTile(this->coordToOffset(xyz), val, active);
 }
 
@@ -1305,6 +1374,46 @@ LeafNode<bool, Log2Dim>::topologyDifference(const LeafNode<OtherType, Log2Dim>& 
 
 template<Index Log2Dim>
 inline void
+LeafNode<bool, Log2Dim>::clip(const CoordBBox& clipBBox, bool background)
+{
+    CoordBBox nodeBBox = this->getNodeBoundingBox();
+    if (!clipBBox.hasOverlap(nodeBBox)) {
+        // This node lies completely outside the clipping region.  Fill it with background tiles.
+        this->fill(nodeBBox, background, /*active=*/false);
+    } else if (clipBBox.isInside(nodeBBox)) {
+        // This node lies completely inside the clipping region.  Leave it intact.
+        return;
+    }
+
+    // This node isn't completely contained inside the clipping region.
+    // Set any voxels that lie outside the region to the background value.
+
+    // Construct a boolean mask that is on inside the clipping region and off outside it.
+    NodeMaskType mask;
+    nodeBBox.intersect(clipBBox);
+    Coord xyz;
+    int &x = xyz.x(), &y = xyz.y(), &z = xyz.z();
+    for (x = nodeBBox.min().x(); x <= nodeBBox.max().x(); ++x) {
+        for (y = nodeBBox.min().y(); y <= nodeBBox.max().y(); ++y) {
+            for (z = nodeBBox.min().z(); z <= nodeBBox.max().z(); ++z) {
+                mask.setOn(static_cast<Index32>(this->coordToOffset(xyz)));
+            }
+        }
+    }
+
+    // Set voxels that lie in the inactive region of the mask (i.e., outside
+    // the clipping region) to the background value.
+    for (MaskOffIter maskIter = mask.beginOff(); maskIter; ++maskIter) {
+        this->setValueOff(maskIter.pos(), background);
+    }
+}
+
+
+////////////////////////////////////////
+
+
+template<Index Log2Dim>
+inline void
 LeafNode<bool, Log2Dim>::fill(const CoordBBox& bbox, bool value, bool active)
 {
     for (Int32 x = bbox.min().x(); x <= bbox.max().x(); ++x) {
@@ -1371,6 +1480,9 @@ LeafNode<bool, Log2Dim>::copyFromDense(const CoordBBox& bbox, const DenseT& dens
                                        bool background, bool tolerance)
 {
     typedef typename DenseT::ValueType DenseValueType;
+    struct Local {
+        inline static bool toBool(const DenseValueType& v) { return !math::isZero(v); }
+    };
 
     const size_t xStride = dense.xStride(), yStride = dense.yStride(), zStride = dense.zStride();
     const Coord& min = dense.bbox().min();
@@ -1384,12 +1496,12 @@ LeafNode<bool, Log2Dim>::copyFromDense(const CoordBBox& bbox, const DenseT& dens
             Int32 n2 = n1 + ((y & (DIM-1u)) << LOG2DIM);
             for (Int32 z = bbox.min()[2], ez = bbox.max()[2]+1; z < ez; ++z, ++n2, s2 += zStride) {
                 // Note: if tolerance is true (i.e., 1), then all boolean values compare equal.
-                if (tolerance || background == bool(*s2)) {
+                if (tolerance || (background == Local::toBool(*s2))) {
                     mValueMask.setOff(n2);
                     mBuffer.mData.set(n2, background);
                 } else {
                     mValueMask.setOn(n2);
-                    mBuffer.mData.set(n2, bool(*s2));
+                    mBuffer.mData.set(n2, Local::toBool(*s2));
                 }
             }
         }
@@ -1650,6 +1762,6 @@ LeafNode<bool, Log2Dim>::doVisit2(NodeT& self, OtherChildAllIterT& otherIter,
 
 #endif // OPENVDB_TREE_LEAFNODEBOOL_HAS_BEEN_INCLUDED
 
-// Copyright (c) 2012-2013 DreamWorks Animation LLC
+// Copyright (c) 2012-2015 DreamWorks Animation LLC
 // All rights reserved. This software is distributed under the
 // Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )

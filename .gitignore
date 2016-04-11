@@ -6,3 +6,6 @@ CMakeFiles
 CMakeCache.txt
 cmake_install.cmake
 CMakeLists.txt.user
+build/*
+*.vdb
+OpenVDBBuild.lib
