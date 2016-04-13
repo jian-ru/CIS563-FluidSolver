@@ -187,7 +187,8 @@ public:
 		vaddProgram = createCSProgram("gpu_vadd_cs.glsl");
 		vmulProgram = createCSProgram("gpu_vmul_cs.glsl");
 		vdivProgram = createCSProgram("gpu_vdiv_cs.glsl");
-		reduceProgram = createCSProgram("gpu_reduce_cs.glsl");
+		//reduceProgram = createCSProgram("gpu_reduce_cs_v01.glsl");
+		reduceProgram = createCSProgram("gpu_reduce_cs_v02.glsl");
 
 		memset(cbMeta, 0, 12);
 		glGenBuffers(1, &cbMetaName);
@@ -319,65 +320,141 @@ public:
 		glFinish();
 	}
 
+	/* VERSION 01 */
+	//void reduce(GLuint in_v, float *p_result)
+	//{
+	//	static bool onceThrough = false;
+
+	//	if (!onceThrough)
+	//	{
+	//		float tmpCPU[2048] = { 0 };
+	//		glGenBuffers(1, &tmp);
+	//		glGenBuffers(1, &tmp2);
+	//		glBindBuffer(GL_SHADER_STORAGE_BUFFER, tmp);
+	//		glBufferData(GL_SHADER_STORAGE_BUFFER, 2048 * sizeof(float), tmpCPU, GL_DYNAMIC_READ);
+	//		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	//		onceThrough = true;
+	//	}
+
+	//	glUseProgram(reduceProgram);
+
+	//	int segments = (size1D + 2047) / 2048;
+	//	int pass = 0;
+
+	//	while (true)
+	//	{
+	//		std::vector<float> intermediateResults;
+	//		intermediateResults.resize((segments + 2047) / 2048 * 2048, 0.f);
+
+	//		for (int i = 0; i < segments; ++i)
+	//		{
+	//			if (pass == 0)
+	//			{
+	//				glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, in_v, 2048 * i * sizeof(float), 2048 * sizeof(float));
+	//			}
+	//			else
+	//			{
+	//				glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, tmp2, 2048 * i * sizeof(float), 2048 * sizeof(float));
+	//			}
+
+	//			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 1, tmp, 0, 2048 * sizeof(float));
+
+	//			glDispatchCompute(1, 1, 1);
+
+	//			glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+	//			glFinish();
+
+	//			float *result = (float *)glMapNamedBufferRange(tmp, 2047 * sizeof(float), sizeof(float), GL_MAP_READ_BIT);
+	//			intermediateResults[i] = *result;
+	//			glUnmapNamedBuffer(tmp);
+	//		}
+
+	//		if (segments > 1)
+	//		{
+	//			glBindBuffer(GL_SHADER_STORAGE_BUFFER, tmp2);
+	//			glBufferData(GL_SHADER_STORAGE_BUFFER, intermediateResults.size() * sizeof(float), NULL, GL_STATIC_DRAW); // orphaning
+	//			glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, intermediateResults.size() * sizeof(float), intermediateResults.data());
+	//			++pass;
+	//			segments = (segments + 2047) / 2048;
+	//		}
+	//		else
+	//		{
+	//			*p_result = intermediateResults[0];
+	//			break;
+	//		}
+	//	}
+	//}
+
+	/* VERSION 02 */
 	void reduce(GLuint in_v, float *p_result)
 	{
 		static bool onceThrough = false;
+		static int lastSize = -1;
+		static std::vector<float> zeroVec;
 		
 		if (!onceThrough)
 		{
-			float tmpCPU[2048] = { 0 };
 			glGenBuffers(1, &tmp);
 			glGenBuffers(1, &tmp2);
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, tmp);
-			glBufferData(GL_SHADER_STORAGE_BUFFER, 2048 * sizeof(float), tmpCPU, GL_DYNAMIC_READ);
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 			onceThrough = true;
 		}
 
 		glUseProgram(reduceProgram);
 		
-		int segments = (size1D + 2047) / 2048;
+		const int localGroupSize = 1024;
+		const int segmentSize = localGroupSize * 2;
+
+		int segments = (size1D + segmentSize - 1) / segmentSize;
 		int pass = 0;
+
+		if (size1D != lastSize)
+		{
+			int tmpSize = (segments + segmentSize - 1) / segmentSize * segmentSize;
+
+			zeroVec.resize(tmpSize, 0.f);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, tmp);
+			glBufferData(GL_SHADER_STORAGE_BUFFER, zeroVec.size() * sizeof(float), NULL, GL_DYNAMIC_READ);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, tmp2);
+			glBufferData(GL_SHADER_STORAGE_BUFFER, zeroVec.size() * sizeof(float), NULL, GL_DYNAMIC_READ);
+			lastSize = size1D;
+		}
 
 		while (true)
 		{
-			std::vector<float> intermediateResults;
-			intermediateResults.resize((segments + 2047) / 2048 * 2048, 0.f);
+			int tmpSize = (segments + segmentSize - 1) / segmentSize * segmentSize;
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, tmp);
+			glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, tmpSize * sizeof(float), zeroVec.data());
 
-			for (int i = 0; i < segments; ++i)
+			if (pass == 0)
 			{
-				if (pass == 0)
-				{
-					glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, in_v, 2048 * i * sizeof(float), 2048 * sizeof(float));
-				}
-				else
-				{
-					glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, tmp2, 2048 * i * sizeof(float), 2048 * sizeof(float));
-				}
-
-				glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 1, tmp, 0, 2048 * sizeof(float));
-				
-				glDispatchCompute(1, 1, 1);
-
-				glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-				glFinish();
-
-				float *result = (float *)glMapNamedBufferRange(tmp, 2047 * sizeof(float), sizeof(float), GL_MAP_READ_BIT);
-				intermediateResults[i] = *result;
-				glUnmapNamedBuffer(tmp);
-			}
-
-			if (segments > 1)
-			{
-				glBindBuffer(GL_SHADER_STORAGE_BUFFER, tmp2);
-				glBufferData(GL_SHADER_STORAGE_BUFFER, intermediateResults.size() * sizeof(float), NULL, GL_STATIC_DRAW); // orphaning
-				glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, intermediateResults.size() * sizeof(float), intermediateResults.data());
-				++pass;
-				segments = (segments + 2047) / 2048;
+				glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, in_v, 0, segments * segmentSize * sizeof(float));
 			}
 			else
 			{
-				*p_result = intermediateResults[0];
+				glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, tmp2, 0, segments * segmentSize * sizeof(float));
+			}
+
+			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 1, tmp, 0, tmpSize * sizeof(float));
+
+			glDispatchCompute(segments, 1, 1);
+
+			glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+			glFinish();
+
+			if (segments > 1)
+			{
+				int tmptmp = tmp2;
+				tmp2 = tmp;
+				tmp = tmptmp;
+				++pass;
+				segments = (segments + segmentSize - 1) / segmentSize;
+			}
+			else
+			{
+				glBindBuffer(GL_COPY_READ_BUFFER, tmp);
+				float *result = (float *)glMapBufferRange(GL_COPY_READ_BUFFER, 0, sizeof(float), GL_MAP_READ_BIT);
+				*p_result = *result;
+				glUnmapBuffer(GL_COPY_READ_BUFFER);
 				break;
 			}
 		}

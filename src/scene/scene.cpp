@@ -37,7 +37,7 @@ std::shared_ptr<FS_Scene> FS_Scene::createFS_Scene(std::ifstream &jsonStream)
 	bbox.xmax = c_scaleX / 2.f;
 	bbox.ymax = c_scaleY / 2.f;
 	bbox.zmax = c_scaleZ / 2.f;
-	newScene->grid = std::shared_ptr<FS_MACGrid>(new FS_MACGrid(bbox, .25f));
+	newScene->grid = std::shared_ptr<FS_MACGrid>(new FS_MACGrid(bbox, .125f));
 	newScene->grid->init();
 
 	// Source
