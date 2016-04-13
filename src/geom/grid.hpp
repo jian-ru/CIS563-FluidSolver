@@ -22,7 +22,7 @@ public:
 
 	void zeromem();
 
-	T &operator()(int i, int j, int k);
+	inline T &operator()(int i, int j, int k) { return values[(i + 1) * ysize * zsize + (j + 1) * zsize + (k + 1)]; }
 };
 
 
@@ -49,6 +49,8 @@ public:
 	std::vector<float> debugVelocity;
 	GLuint debugVAO, debugVBO1, debugVBO2, debugVBO3, debugVBO4;
 	GLuint debugProgram;
+
+	GLuint buff_tmp[12]; // for gpu pressure solve
 
 
 	FS_MACGrid(const FS_BBox &b, float csize);
@@ -79,6 +81,8 @@ public:
 	void swapActiveParticleArray();
 
 	void updatePressureAndVelocity(float deltaTime);
+
+	void gpu_updatePressureAndVelocity(float deltaTime);
 
 	float findMaxSpeed();
 

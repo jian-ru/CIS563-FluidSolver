@@ -22,10 +22,10 @@ FS_Grid<T>::FS_Grid(int xcount, int ycount, int zcount)
 template <class T>
 void FS_Grid<T>::resize(int xcount, int ycount, int zcount)
 {
-	xsize = xcount;
-	ysize = ycount;
-	zsize = zcount;
-	values.resize(xcount * ycount * zcount);
+	xsize = xcount + 2;
+	ysize = ycount + 2;
+	zsize = zcount + 2;
+	values.resize(xsize * ysize * zsize);
 }
 
 
@@ -36,15 +36,11 @@ void FS_Grid<T>::zeromem()
 }
 
 
-template <class T>
-T &FS_Grid<T>::operator()(int i, int j, int k)
-{
-	i = std::max(0, std::min(xsize - 1, i));
-	j = std::max(0, std::min(ysize - 1, j));
-	k = std::max(0, std::min(zsize - 1, k));
-
-	return values[i * ysize * zsize + j * zsize + k];
-}
+//template <class T>
+//T &FS_Grid<T>::operator()(int i, int j, int k)
+//{
+//	return values[(i + 1) * ysize * zsize + (j + 1) * zsize + (k + 1)];
+//}
 
 
 FS_MACGrid::FS_MACGrid(const FS_BBox &b, float csize)
@@ -76,11 +72,17 @@ FS_MACGrid::FS_MACGrid(const FS_BBox &b, float csize)
 
 	rng = std::uniform_real_distribution<float>(0.f, 1.f);
 	generator = std::mt19937(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+
+	glGenBuffers(12, buff_tmp);
 }
 
 
 void FS_MACGrid::init()
 {
+	int size1D = 2;
+	int size2D = size1D * size1D;
+	int size3D = size1D * size1D * size1D;
+
 	int xsize = xcount / 3;
 	int ysize = ycount;
 	int zsize = zcount;
@@ -89,8 +91,8 @@ void FS_MACGrid::init()
 	particles2 = std::make_shared<std::vector<FS_Particle> >();
 	particles1->clear();
 	particles2->clear();
-	particles1->reserve(xsize * ysize * zsize * 8);
-	particles2->resize(xsize * ysize * zsize * 8);
+	particles1->reserve(xsize * ysize * zsize * size3D);
+	particles2->resize(xsize * ysize * zsize * size3D);
 
 	//int xstart = (xcount - xsize) / 2;
 	//int ystart = (ycount - ysize) / 2;
@@ -105,15 +107,15 @@ void FS_MACGrid::init()
 		{
 			for (int k = zstart; k < zstart + zsize; ++k)
 			{
-				for (int h = 0; h < 8; ++h)
+				for (int h = 0; h < size3D; ++h)
 				{
 					FS_Particle p;
-					int x = h / 4;
-					int y = h / 2 % 2;
-					int z = h % 2;
-					float xpos = (x + rng(generator)) * cellSize * 0.5f;
-					float ypos = (y + rng(generator)) * cellSize * 0.5f;
-					float zpos = (z + rng(generator)) * cellSize * 0.5f;
+					int x = h / size2D;
+					int y = h / size1D % size1D;
+					int z = h % size1D;
+					float xpos = (x + rng(generator)) * (cellSize / static_cast<float>(size1D));
+					float ypos = (y + rng(generator)) * (cellSize / static_cast<float>(size1D));
+					float zpos = (z + rng(generator)) * (cellSize / static_cast<float>(size1D));
 
 					xpos += bounds.xmin + i * cellSize;
 					ypos += bounds.ymin + j * cellSize;
@@ -128,6 +130,654 @@ void FS_MACGrid::init()
 	}
 
 	particles = particles1;
+}
+
+
+class GPUOPERATIONS
+{
+public:
+	GLuint sparseMvProgram;
+	GLuint vaddProgram;
+	GLuint vmulProgram;
+	GLuint vdivProgram;
+	GLuint reduceProgram;
+
+	int size1D;
+
+	GLuint tmp, tmp2;
+	GLuint v1v2;
+
+	GLuint cbMetaName;
+	char cbMeta[12];
+
+	GPUOPERATIONS()
+	{
+		auto createCSProgram = [](const char *fn) -> GLuint
+		{
+			std::string csFileName(SHADERS_DIR);
+			csFileName += "/";
+			csFileName += fn;
+			GLuint csn = loadShader(csFileName.c_str(), GL_COMPUTE_SHADER);
+
+			GLuint program = glCreateProgram();
+			glAttachShader(program, csn);
+			glLinkProgram(program);
+
+			glDeleteShader(csn);
+
+			// Check link status
+			GLint result;
+			int infoLogLength;
+			glGetProgramiv(program, GL_LINK_STATUS, &result);
+			glGetProgramiv(program, GL_INFO_LOG_LENGTH, &infoLogLength);
+			if (infoLogLength > 0) {
+				std::vector<char> msg(infoLogLength + 1);
+				glGetProgramInfoLog(program, infoLogLength, NULL, &msg[0]);
+				std::cout << msg.data() << '\n';
+			}
+			if (!result)
+			{
+				exit(EXIT_FAILURE);
+			}
+
+			return program;
+		};
+
+		sparseMvProgram = createCSProgram("gpu_sparse_mv_cs.glsl");
+		vaddProgram = createCSProgram("gpu_vadd_cs.glsl");
+		vmulProgram = createCSProgram("gpu_vmul_cs.glsl");
+		vdivProgram = createCSProgram("gpu_vdiv_cs.glsl");
+		reduceProgram = createCSProgram("gpu_reduce_cs.glsl");
+
+		memset(cbMeta, 0, 12);
+		glGenBuffers(1, &cbMetaName);
+		glBindBuffer(GL_UNIFORM_BUFFER, cbMetaName);
+		glBufferData(GL_UNIFORM_BUFFER, 12, cbMeta, GL_STREAM_DRAW);
+		glBindBuffer(GL_UNIFORM_BUFFER, 0); // unbind
+	}
+
+	~GPUOPERATIONS()
+	{
+		glDeleteProgram(sparseMvProgram);
+		glDeleteProgram(vaddProgram);
+		glDeleteProgram(vmulProgram);
+		glDeleteProgram(vdivProgram);
+		glDeleteProgram(reduceProgram);
+		glDeleteBuffers(1, &cbMetaName);
+		glDeleteBuffers(1, &tmp);
+		glDeleteBuffers(1, &tmp2);
+		glDeleteBuffers(1, &v1v2);
+	}
+
+	void setSize1D(int s1D)
+	{
+		size1D = s1D;
+		glBindBuffer(GL_UNIFORM_BUFFER, cbMetaName);
+		glBufferSubData(GL_UNIFORM_BUFFER, 0, 4, &s1D);
+	}
+
+	void bindConstantBuffer()
+	{
+		glBindBufferBase(GL_UNIFORM_BUFFER, 0, cbMetaName);
+	}
+
+	void sparseMv(GLuint diagA, GLuint offDiagA, GLuint offsetSizeBuffer, GLuint colNums, GLuint in_x, GLuint out_x)
+	{
+		glUseProgram(sparseMvProgram);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, diagA);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, offDiagA);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, offsetSizeBuffer);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, colNums);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, in_x);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, out_x);
+
+		const int localGroupSize = 256;
+		int numGroups = (size1D + localGroupSize - 1) / localGroupSize;
+
+		glDispatchCompute(numGroups, 1, 1);
+
+		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+		glFinish();
+
+		// debug
+		//glBindBuffer(GL_COPY_READ_BUFFER, out_x);
+		//float *mapped = (float *)glMapBufferRange(GL_COPY_READ_BUFFER, 0, size1D * sizeof(float), GL_MAP_READ_BIT);
+		//std::vector<float> tmp(size1D, 0.f);
+		//memcpy(&tmp[0], mapped, size1D * sizeof(float));
+		//glUnmapBuffer(GL_COPY_READ_BUFFER);
+	}
+
+	void vadd(float c1, GLuint v1, float c2, GLuint v2, GLuint out_v)
+	{
+		glUseProgram(vaddProgram);
+		glBindBuffer(GL_UNIFORM_BUFFER, cbMetaName);
+		float *c1c2 = (float *)glMapBufferRange(GL_UNIFORM_BUFFER, 4, 8, GL_MAP_WRITE_BIT);
+		c1c2[0] = c1;
+		c1c2[1] = c2;
+		glUnmapBuffer(GL_UNIFORM_BUFFER);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, v1);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, v2);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, out_v);
+
+		const int localGroupSize = 256;
+		int numGroups = (size1D + localGroupSize - 1) / localGroupSize;
+
+		glDispatchCompute(numGroups, 1, 1);
+
+		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+		glFinish();
+
+		// debug
+		//glBindBuffer(GL_COPY_READ_BUFFER, out_v);
+		//float *mapped = (float *)glMapBufferRange(GL_COPY_READ_BUFFER, 0, size1D * sizeof(float), GL_MAP_READ_BIT);
+		//std::vector<float> tmp(size1D, 0.f);
+		//memcpy(&tmp[0], mapped, size1D * sizeof(float));
+		//glUnmapBuffer(GL_COPY_READ_BUFFER);
+
+		//glBindBuffer(GL_COPY_READ_BUFFER, v1);
+		//mapped = (float *)glMapBufferRange(GL_COPY_READ_BUFFER, 0, size1D * sizeof(float), GL_MAP_READ_BIT);
+		//memcpy(&tmp[0], mapped, size1D * sizeof(float));
+		//glUnmapBuffer(GL_COPY_READ_BUFFER);
+	}
+
+	void vmul(GLuint v1, GLuint v2, GLuint out_v)
+	{
+		glUseProgram(vmulProgram);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, v1);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, v2);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, out_v);
+
+		const int localGroupSize = 256;
+		int numGroups = (size1D + localGroupSize - 1) / localGroupSize;
+
+		glDispatchCompute(numGroups, 1, 1);
+
+		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+		glFinish();
+
+		// debug
+		//glBindBuffer(GL_COPY_READ_BUFFER, out_v);
+		//float *mapped = (float *)glMapBufferRange(GL_COPY_READ_BUFFER, 0, size1D * sizeof(float), GL_MAP_READ_BIT);
+		//std::vector<float> tmp(size1D, 0.f);
+		//memcpy(&tmp[0], mapped, size1D * sizeof(float));
+		//glUnmapBuffer(GL_COPY_READ_BUFFER);
+	}
+
+	void vdiv(GLuint v1, GLuint v2, GLuint out_v)
+	{
+		glUseProgram(vdivProgram);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, v1);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, v2);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, out_v);
+
+		const int localGroupSize = 256;
+		int numGroups = (size1D + localGroupSize - 1) / localGroupSize;
+
+		glDispatchCompute(numGroups, 1, 1);
+
+		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+		glFinish();
+	}
+
+	void reduce(GLuint in_v, float *p_result)
+	{
+		static bool onceThrough = false;
+		
+		if (!onceThrough)
+		{
+			float tmpCPU[2048] = { 0 };
+			glGenBuffers(1, &tmp);
+			glGenBuffers(1, &tmp2);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, tmp);
+			glBufferData(GL_SHADER_STORAGE_BUFFER, 2048 * sizeof(float), tmpCPU, GL_DYNAMIC_READ);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+			onceThrough = true;
+		}
+
+		glUseProgram(reduceProgram);
+		
+		int segments = (size1D + 2047) / 2048;
+		int pass = 0;
+
+		while (true)
+		{
+			std::vector<float> intermediateResults;
+			intermediateResults.resize((segments + 2047) / 2048 * 2048, 0.f);
+
+			for (int i = 0; i < segments; ++i)
+			{
+				if (pass == 0)
+				{
+					glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, in_v, 2048 * i * sizeof(float), 2048 * sizeof(float));
+				}
+				else
+				{
+					glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, tmp2, 2048 * i * sizeof(float), 2048 * sizeof(float));
+				}
+
+				glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 1, tmp, 0, 2048 * sizeof(float));
+				
+				glDispatchCompute(1, 1, 1);
+
+				glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+				glFinish();
+
+				float *result = (float *)glMapNamedBufferRange(tmp, 2047 * sizeof(float), sizeof(float), GL_MAP_READ_BIT);
+				intermediateResults[i] = *result;
+				glUnmapNamedBuffer(tmp);
+			}
+
+			if (segments > 1)
+			{
+				glBindBuffer(GL_SHADER_STORAGE_BUFFER, tmp2);
+				glBufferData(GL_SHADER_STORAGE_BUFFER, intermediateResults.size() * sizeof(float), NULL, GL_STATIC_DRAW); // orphaning
+				glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, intermediateResults.size() * sizeof(float), intermediateResults.data());
+				++pass;
+				segments = (segments + 2047) / 2048;
+			}
+			else
+			{
+				*p_result = intermediateResults[0];
+				break;
+			}
+		}
+	}
+
+	void dot(GLuint v1, GLuint v2, float *result)
+	{
+		static bool onceThrough = false;
+		static int lastSize = -1;
+		static std::vector<float> v1v2CPU;
+
+		if (!onceThrough)
+		{
+			glGenBuffers(1, &v1v2);
+			onceThrough = true;
+		}
+
+		int size = (size1D + 2047) / 2048 * 2048;
+
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, v1v2);
+		
+		if (size1D != lastSize)
+		{
+			v1v2CPU.resize(size, 0.f);
+			glBufferData(GL_SHADER_STORAGE_BUFFER, size * sizeof(float), NULL, GL_DYNAMIC_COPY);
+			lastSize = size1D;
+		}
+		
+		glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, size * sizeof(float), v1v2CPU.data());
+
+		vmul(v1, v2, v1v2);
+		reduce(v1v2, result);
+	}
+};
+
+
+void FS_MACGrid::gpu_updatePressureAndVelocity(float deltaTime)
+{
+	int numFluidCells = 0;
+	std::unordered_map<int, int> mapping; // fluid cell flat index to row number
+
+	for (int i = 0; i < xcount; ++i)
+	{
+		for (int j = 0; j < ycount; ++j)
+		{
+			for (int k = 0; k < zcount; ++k)
+			{
+				if (cellTypes(i, j, k) == 1)
+				{
+					int linIdx = i * ycount * zcount + j * zcount + k;
+					mapping[linIdx] = numFluidCells;
+					++numFluidCells;
+				}
+			}
+		}
+	}
+
+	// Build buffers used in conjugate gradient method
+	std::vector<float> diagACPU((numFluidCells + 2047) / 2048 * 2048, 0.f);
+	std::vector<float> one_diagACPU((numFluidCells + 2047) / 2048 * 2048, 0.f);
+	std::vector<float> bCPU((numFluidCells + 2047) / 2048 * 2048, 0.f);
+	std::vector<float> offDiagACPU;
+	std::vector<int> osbCPU(numFluidCells * 2);
+	std::vector<int> colNumsCPU;
+	std::vector<float> zeroVec((numFluidCells + 2047) / 2048 * 2048, 0.f);
+
+	auto updateRow = [&](int x, int y, int z)
+	{
+		int numNonsolidNeighbours = 0;
+		int linIdx = x * ycount * zcount + y * zcount + z;
+		int rowNum = mapping[linIdx];
+		int colNum;
+		int ct;
+
+		int offset = offDiagACPU.size();
+		int size = 0;
+
+		ct = (x - 1 < 0) ? 2 : cellTypes(x - 1, y, z);
+		numNonsolidNeighbours += (ct == 2) ? 0 : 1;
+		if (ct == 1)
+		{
+			colNum = mapping[(x - 1) * ycount * zcount + y * zcount + z];
+			offDiagACPU.push_back(-1.f);
+			colNumsCPU.push_back(colNum);
+			++size;
+		}
+
+		ct = (x + 1 >= xcount) ? 2 : cellTypes(x + 1, y, z);
+		numNonsolidNeighbours += (ct == 2) ? 0 : 1;
+		if (ct == 1)
+		{
+			colNum = mapping[(x + 1) * ycount * zcount + y * zcount + z];
+			offDiagACPU.push_back(-1.f);
+			colNumsCPU.push_back(colNum);
+			++size;
+		}
+
+		ct = (y - 1 < 0) ? 2 : cellTypes(x, y - 1, z);
+		numNonsolidNeighbours += (ct == 2) ? 0 : 1;
+		if (ct == 1)
+		{
+			colNum = mapping[x * ycount * zcount + (y - 1) * zcount + z];
+			offDiagACPU.push_back(-1.f);
+			colNumsCPU.push_back(colNum);
+			++size;
+		}
+
+		ct = (y + 1 >= ycount) ? 2 : cellTypes(x, y + 1, z);
+		numNonsolidNeighbours += (ct == 2) ? 0 : 1;
+		if (ct == 1)
+		{
+			colNum = mapping[x * ycount * zcount + (y + 1) * zcount + z];
+			offDiagACPU.push_back(-1.f);
+			colNumsCPU.push_back(colNum);
+			++size;
+		}
+
+		ct = (z - 1 < 0) ? 2 : cellTypes(x, y, z - 1);
+		numNonsolidNeighbours += (ct == 2) ? 0 : 1;
+		if (ct == 1)
+		{
+			colNum = mapping[x * ycount * zcount + y * zcount + (z - 1)];
+			offDiagACPU.push_back(-1.f);
+			colNumsCPU.push_back(colNum);
+			++size;
+		}
+
+		ct = (z + 1 >= zcount) ? 2 : cellTypes(x, y, z + 1);
+		numNonsolidNeighbours += (ct == 2) ? 0 : 1;
+		if (ct == 1)
+		{
+			colNum = mapping[x * ycount * zcount + y * zcount + (z + 1)];
+			offDiagACPU.push_back(-1.f);
+			colNumsCPU.push_back(colNum);
+			++size;
+		}
+
+		osbCPU[rowNum * 2] = offset;
+		osbCPU[rowNum * 2 + 1] = size;
+		diagACPU[rowNum] = static_cast<float>(numNonsolidNeighbours);
+		one_diagACPU[rowNum] = 1.f / numNonsolidNeighbours;
+	};
+
+	auto computeDivergence = [&](int x, int y, int z) -> float
+	{
+		float result;
+
+		result = us(x + 1, y, z) - us(x, y, z) +
+			vs(x, y + 1, z) - vs(x, y, z) +
+			ws(x, y, z + 1) - ws(x, y, z);
+		result *= cellSize / deltaTime;
+
+		return result;
+	};
+
+	for (int i = 0; i < xcount; ++i)
+	{
+		for (int j = 0; j < ycount; ++j)
+		{
+			for (int k = 0; k < zcount; ++k)
+			{
+				if (cellTypes(i, j, k) == 1)
+				{
+					updateRow(i, j, k); // update corresponding row in A
+
+					float negDiv = -computeDivergence(i, j, k);
+					int linIdx = i * ycount * zcount + j * zcount + k;
+					int mappedIdx = mapping[linIdx];
+					bCPU[mappedIdx] = negDiv;
+				}
+			}
+		}
+	}
+
+	GLuint diagA, offDiagA, osb, colNums, x, ax, b, one_diagA, r, d, q, s;
+
+	diagA = buff_tmp[0];
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, diagA);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, diagACPU.size() * sizeof(float), diagACPU.data(), GL_STATIC_DRAW);
+
+	// debug
+	//glBindBuffer(GL_COPY_READ_BUFFER, diagA);
+	//float *mapped1 = (float *)glMapBufferRange(GL_COPY_READ_BUFFER, 0, diagACPU.size() * sizeof(float), GL_MAP_READ_BIT);
+	//std::vector<float> tmptmp(diagACPU.size(), 0.f);
+	//memcpy(&tmptmp[0], mapped1, diagACPU.size() * sizeof(float));
+	//glUnmapBuffer(GL_COPY_READ_BUFFER);
+
+	one_diagA = buff_tmp[1];
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, one_diagA);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, one_diagACPU.size() * sizeof(float), one_diagACPU.data(), GL_STATIC_DRAW);
+
+	osb = buff_tmp[2];
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, osb);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, osbCPU.size() * sizeof(float), osbCPU.data(), GL_STATIC_DRAW);
+
+	colNums = buff_tmp[3];
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, colNums);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, colNumsCPU.size() * sizeof(float), colNumsCPU.data(), GL_STATIC_DRAW);
+
+	x = buff_tmp[4];
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, x);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, zeroVec.size() * sizeof(float), zeroVec.data(), GL_DYNAMIC_READ);
+
+	ax = buff_tmp[5];
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, ax);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, zeroVec.size() * sizeof(float), zeroVec.data(), GL_DYNAMIC_COPY);
+
+	b = buff_tmp[6];
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, b);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, bCPU.size() * sizeof(float), bCPU.data(), GL_STATIC_DRAW);
+
+	r = buff_tmp[7];
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, r);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, zeroVec.size() * sizeof(float), zeroVec.data(), GL_DYNAMIC_COPY);
+
+	d = buff_tmp[8];
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, d);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, zeroVec.size() * sizeof(float), zeroVec.data(), GL_DYNAMIC_COPY);
+
+	q = buff_tmp[9];
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, q);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, zeroVec.size() * sizeof(float), zeroVec.data(), GL_DYNAMIC_COPY);
+
+	s = buff_tmp[10];
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, s);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, zeroVec.size() * sizeof(float), zeroVec.data(), GL_DYNAMIC_COPY);
+
+	offDiagA = buff_tmp[11];
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, offDiagA);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, offDiagACPU.size() * sizeof(float), offDiagACPU.data(), GL_STATIC_DRAW);
+
+
+	static GPUOPERATIONS gpu_ops;
+
+	gpu_ops.setSize1D(numFluidCells);
+	gpu_ops.bindConstantBuffer();
+
+	float delta_new, delta_old, delta0;
+
+	gpu_ops.sparseMv(diagA, offDiagA, osb, colNums, x, ax); // Ax
+	gpu_ops.vadd(1.f, b, -1.f, ax, r);
+	gpu_ops.vmul(one_diagA, r, d);
+	gpu_ops.dot(r, d, &delta_new);
+
+	int i = 0, iMax = numFluidCells;
+	delta0 = delta_new;
+
+	while (i < iMax && delta_new > 1e-6 * delta0)
+	{
+		gpu_ops.sparseMv(diagA, offDiagA, osb, colNums, d, q);
+		float tmp;
+		gpu_ops.dot(d, q, &tmp);
+		float alpha = delta_new / tmp;
+		gpu_ops.vadd(1.f, x, alpha, d, x);
+
+		if (i % 50 == 0)
+		{
+			gpu_ops.sparseMv(diagA, offDiagA, osb, colNums, x, ax);
+			gpu_ops.vadd(1.f, b, -1.f, ax, r);
+		}
+		else
+		{
+			gpu_ops.vadd(1.f, r, -alpha, q, r);
+		}
+
+		gpu_ops.vmul(one_diagA, r, s);
+		delta_old = delta_new;
+		gpu_ops.dot(r, s, &delta_new);
+		float beta = delta_new / delta_old;
+		gpu_ops.vadd(1.f, s, beta, d, d);
+
+		++i;
+	}
+	
+	std::vector<float> xCPU(numFluidCells);
+	float *mapped = (float *)glMapNamedBufferRange(x, 0, numFluidCells * sizeof(float), GL_MAP_READ_BIT);
+	memcpy(&xCPU[0], mapped, numFluidCells * sizeof(float));
+	glUnmapNamedBuffer(x);
+
+	tbb::parallel_for(tbb::blocked_range3d<int>(0, xcount, 0, ycount, 0, zcount), [&](const tbb::blocked_range3d<int> &r) {
+		for (int i = r.pages().begin(); i != r.pages().end(); ++i)
+		{
+			for (int j = r.rows().begin(); j != r.rows().end(); ++j)
+			{
+				for (int k = r.cols().begin(); k != r.cols().end(); ++k)
+				{
+					if (cellTypes(i, j, k) == 1)
+					{
+						int linIdx = i * ycount * zcount + j * zcount + k;
+						int mappedIdx = mapping[linIdx];
+						ps(i, j, k) = xCPU[mappedIdx];
+					}
+				}
+			}
+		}
+	});
+
+	// Compute pressure gradients and update velocities for the faces of all fluid cells
+	// Boundary face is set to zero
+	auto updateU = [&](int x, int y, int z)
+	{
+		float dp;
+		float dt_dx = deltaTime / cellSize;
+
+		if (x != 0 && x != xcount)
+		{
+			dp = ps(x, y, z) - ps(x - 1, y, z);
+			us(x, y, z) -= dt_dx * dp;
+		}
+	};
+
+	auto updateV = [&](int x, int y, int z)
+	{
+		float dp;
+		float dt_dx = deltaTime / cellSize;
+
+		if (y != 0 && y != ycount)
+		{
+			dp = ps(x, y, z) - ps(x, y - 1, z);
+			vs(x, y, z) -= dt_dx * dp;
+		}
+	};
+
+	auto updateW = [&](int x, int y, int z)
+	{
+		float dp;
+		float dt_dx = deltaTime / cellSize;
+
+		if (z != 0 && z != zcount)
+		{
+			dp = ps(x, y, z) - ps(x, y, z - 1);
+			ws(x, y, z) -= dt_dx * dp;
+		}
+	};
+
+	//for (int i = 0; i < xcount + 1; ++i)
+	//{
+	//	for (int j = 0; j < ycount; ++j)
+	//	{
+	//		for (int k = 0; k < zcount; ++k)
+	//		{
+	tbb::parallel_for(tbb::blocked_range3d<int>(0, xcount + 1, 0, ycount, 0, zcount), [&](const tbb::blocked_range3d<int> &r) {
+		for (int i = r.pages().begin(); i != r.pages().end(); ++i)
+		{
+			for (int j = r.rows().begin(); j != r.rows().end(); ++j)
+			{
+				for (int k = r.cols().begin(); k != r.cols().end(); ++k)
+				{
+					updateU(i, j, k);
+				}
+			}
+		}
+	});
+	//		}
+	//	}
+	//}
+
+	//for (int i = 0; i < xcount; ++i)
+	//{
+	//	for (int j = 0; j < ycount + 1; ++j)
+	//	{
+	//		for (int k = 0; k < zcount; ++k)
+	//		{
+	tbb::parallel_for(tbb::blocked_range3d<int>(0, xcount, 0, ycount + 1, 0, zcount), [&](const tbb::blocked_range3d<int> &r) {
+		for (int i = r.pages().begin(); i != r.pages().end(); ++i)
+		{
+			for (int j = r.rows().begin(); j != r.rows().end(); ++j)
+			{
+				for (int k = r.cols().begin(); k != r.cols().end(); ++k)
+				{
+					updateV(i, j, k);
+				}
+			}
+		}
+	});
+	//		}
+	//	}
+	//}
+
+	//for (int i = 0; i < xcount; ++i)
+	//{
+	//	for (int j = 0; j < ycount; ++j)
+	//	{
+	//		for (int k = 0; k < zcount + 1; ++k)
+	//		{
+	tbb::parallel_for(tbb::blocked_range3d<int>(0, xcount, 0, ycount, 0, zcount + 1), [&](const tbb::blocked_range3d<int> &r) {
+		for (int i = r.pages().begin(); i != r.pages().end(); ++i)
+		{
+			for (int j = r.rows().begin(); j != r.rows().end(); ++j)
+			{
+				for (int k = r.cols().begin(); k != r.cols().end(); ++k)
+				{
+					updateW(i, j, k);
+				}
+			}
+		}
+	});
+	//		}
+	//	}
+	//}
 }
 
 
@@ -257,7 +907,7 @@ void FS_MACGrid::updatePressureAndVelocity(float deltaTime)
 	// Solve Ax = b put resulting pressure back to ps
 	ps.zeromem();
 
-	Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Eigen::Upper|Eigen::Lower, Eigen::IncompleteCholesky<double>> cg(A);
+	Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Eigen::Lower, Eigen::IncompleteCholesky<double> > cg(A);
 	resPressure = cg.solve(b);
 
 	//for (int i = 0; i < xcount; ++i)
