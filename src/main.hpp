@@ -19,6 +19,7 @@
 #include <tbb/blocked_range3d.h>
 #include <tbb/mutex.h>
 #include <tbb/queuing_mutex.h>
+#include <tbb/atomic.h>
 
 
 #define _GPU_INFO

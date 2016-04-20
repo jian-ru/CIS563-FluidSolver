@@ -702,7 +702,7 @@ void FS_MACGrid::gpu_updatePressureAndVelocity(float deltaTime)
 	int i = 0, iMax = numFluidCells;
 	delta0 = delta_new;
 
-	while (i < iMax && delta_new > 1e-6 * delta0)
+	while (i < iMax && delta_new > 1e-7 * delta0)
 	{
 		gpu_ops.sparseMv(diagA, offDiagA, osb, colNums, d, q);
 		float tmp;
@@ -1175,8 +1175,6 @@ void FS_MACGrid::accelerateByGravity(float deltaTime, float amount)
 			}
 		}
 	}
-
-	maxVelocity[1] += amount * deltaTime;
 }
 
 
@@ -1795,22 +1793,22 @@ bool FS_MACGrid::averageVelocityFromNeighbours(int i, int j, int k)
 
 	extrapolatedVelocity /= static_cast<float>(fluidCellCount);
 
-	if (i != 0) // not boundary
+	if (i > 0 && i < xcount) // not boundary
 	{
 		us(i, j, k) = extrapolatedVelocity.x;
 	}
-	if (j != 0) // not boundary
+	if (j > 0 && j < ycount) // not boundary
 	{
 		vs(i, j, k) = extrapolatedVelocity.y;
 	}
-	if (k != 0) // not boundary
+	if (k > 0 && k < zcount) // not boundary
 	{
 		ws(i, j, k) = extrapolatedVelocity.z;
 	}
 }
 
 
-void FS_MACGrid::extrapolateVelocity()
+void FS_MACGrid::extrapolateVelocity(bool onlyBoundary)
 {
 	//for (int i = 0; i < xcount; ++i)
 	//{
@@ -1818,16 +1816,16 @@ void FS_MACGrid::extrapolateVelocity()
 	//	{
 	//		for (int k = 0; k < zcount; ++k)
 	//		{
-	tbb::parallel_for(tbb::blocked_range3d<int>(0, xcount, 0, ycount, 0, zcount), [&](const tbb::blocked_range3d<int> &r) {
+	tbb::parallel_for(tbb::blocked_range3d<int>(-1, xcount + 1, -1, ycount + 1, -1, zcount + 1), [&](const tbb::blocked_range3d<int> &r) {
 		for (int i = r.pages().begin(); i != r.pages().end(); ++i)
 		{
 			for (int j = r.rows().begin(); j != r.rows().end(); ++j)
 			{
 				for (int k = r.cols().begin(); k != r.cols().end(); ++k)
 				{
-					if (cellTypes(i, j, k) != 0 || !averageVelocityFromNeighbours(i, j, k)) // not air or has no fluid neighbour
+					if ((!onlyBoundary && cellTypes(i, j, k) == 0) || i == -1 || i == xcount || j == -1 || j == ycount || k == -1 || k == zcount)
 					{
-						continue;
+						averageVelocityFromNeighbours(i, j, k);
 					}
 				}
 			}

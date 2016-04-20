@@ -1,3 +1,24 @@
+# Submission 05
+
+IMPORTANT:
+    1. After generating the project using cmake and running it once to generate executable,
+       please copy tbb_debug.dll and Half.dll from nuparu/lib/win into where the executable resides.
+	   
+    2. Libraries used were compiled with VS 14 x64 compiler. They may not work with your compiler
+	   if you are using a different one.
+	   
+	3. Uncomment buildSDF() in FS_Grid::render() to enable writing VDB files.
+	   You may want to change the ouput directory specified in FS_Grid::buildSDF().
+	   
+Min OpenGL requirement: 4.3
+Visual Studio requirement: 14 (2015) x64
+
+Updates:
+	1. Implemented Conjugate Gradient method with Diagonal Preconditioning using GPU kernels.
+	   Current implementation is not optimal due to heavy CPU intervention but it is still
+	   about 10 times faster than the CPU implementation.
+	   
+
 # Submission 04
 
 IMPORTANT:

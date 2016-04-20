@@ -74,7 +74,7 @@ public:
 
 	void accelerateByGravity(float deltaTime, float amount = -9.8f);
 
-	void extrapolateVelocity();
+	void extrapolateVelocity(bool onlyBoundary = false);
 	// return false if (i, j, k) has no fluid neighbour
 	bool averageVelocityFromNeighbours(int i, int j, int k);
 

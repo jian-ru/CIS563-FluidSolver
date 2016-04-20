@@ -51,7 +51,7 @@ void FS_TestSolver::solve(float deltaTime, GLuint vbo, void * additionalInfo)
 	// pressure solve and update velocities according to pressure gradients
 	//info->grid->updatePressureAndVelocity(deltaTime);
 	info->grid->gpu_updatePressureAndVelocity(deltaTime);
-	//info->grid->extrapolateVelocity(); // Don't extrapolate here. It will ruin divergence free velocity field
+	info->grid->extrapolateVelocity(true); // Don't extrapolate here. It will ruin divergence free velocity field
 	info->grid->interpolateVelocityDifference(); // FLIP
 	info->grid->interpolateVelocity(); // PIC
 	info->grid->swapActiveParticleArray();
