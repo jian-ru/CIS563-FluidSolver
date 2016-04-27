@@ -5,10 +5,10 @@
 #ifndef main_hpp
 #define main_hpp
 
-#include <openvdb/openvdb.h>
-#include <openvdb/tools/LevelSetSphere.h>
-#include <openvdb/tools/SignedFloodFill.h>
-#include <openvdb/tools/ParticlesToLevelSet.h>
+//#include <openvdb/openvdb.h>
+//#include <openvdb/tools/LevelSetSphere.h>
+//#include <openvdb/tools/SignedFloodFill.h>
+//#include <openvdb/tools/ParticlesToLevelSet.h>
 #include <Windows.h>
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -20,6 +20,7 @@
 #include <tbb/mutex.h>
 #include <tbb/queuing_mutex.h>
 #include <tbb/atomic.h>
+#include <vector>
 
 
 #define _GPU_INFO
@@ -34,6 +35,8 @@
 GLuint loadShader(const char *fileName, GLenum type);
 
 bool readWholeFile(const char *fileName, std::string &ret_content);
+
+bool createProgramWithShaders(const std::vector<GLenum> &types, const std::vector<const char *> &fileNames, GLuint &program);
 
 #endif /* main_hpp */
 

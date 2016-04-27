@@ -12,7 +12,8 @@
 #include "../geom/box_container.hpp"
 #include "../geom/box_source.hpp"
 #include "../fluidSolver/fluidSolver.hpp"
-#include "../geom/grid.hpp"
+//#include "../geom/grid.hpp"
+#include "../geom/gpu_gridd.hpp"
 
 
 class FS_Scene
@@ -26,7 +27,8 @@ public:
 	void render(std::shared_ptr<FS_Camera> pCam);
 	void cleanup();
 
-	std::shared_ptr<FS_MACGrid> grid;
+	std::shared_ptr<FS_GPU_MACGRID> gpu_grid;
+	//std::shared_ptr<FS_MACGrid> grid;
 	std::vector<std::shared_ptr<FS_Geometry> > containers;
 	std::vector<std::shared_ptr<FS_Geometry> > sources;
 	std::shared_ptr<FS_Solver> solver;

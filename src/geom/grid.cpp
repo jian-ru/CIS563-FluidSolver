@@ -2197,69 +2197,69 @@ void FS_MACGrid::drawCellTypeIndicators(GLint uniColorLoc)
 }
 
 
-class VDBParticleList
-{
-public:
-	typedef openvdb::Vec3R  value_type;
-
-	std::shared_ptr<std::vector<FS_Particle> > particles;
-	openvdb::Real radius;
-
-	VDBParticleList(std::shared_ptr<std::vector<FS_Particle> > ps, openvdb::Real r)
-		: particles(ps), radius(r) {}
-
-	size_t size() const { return particles->size(); }
-
-	void getPos(size_t n, openvdb::Vec3R &pos) const
-	{
-		std::vector<FS_Particle> &ps = *particles;
-		pos.x() = ps[n].position.x;
-		pos.y() = ps[n].position.y;
-		pos.z() = ps[n].position.z;
-	}
-
-	void getPosRad(size_t n, openvdb::Vec3R& pos, openvdb::Real& rad) const
-	{
-		getPos(n, pos);
-		rad = radius;
-	}
-
-	void getPosRadVel(size_t n, openvdb::Vec3R& pos, openvdb::Real& rad, openvdb::Vec3R& vel) const
-	{
-		getPosRad(n, pos, rad);
-		std::vector<FS_Particle> &ps = *particles;
-		vel.x() = ps[n].velocity.x;
-		vel.y() = ps[n].velocity.y;
-		vel.z() = ps[n].velocity.z;
-	}
-};
-
-
-void FS_MACGrid::buildSDF()
-{
-	static int frameCount = 0;
-
-	VDBParticleList pls(particles, cellSize * .5f);
-
-	const float voxelSize = cellSize * .25f, halfWidth = 6.f;
-	openvdb::FloatGrid::Ptr ls = openvdb::createLevelSet<openvdb::FloatGrid>(voxelSize, halfWidth);
-	openvdb::tools::ParticlesToLevelSet<openvdb::FloatGrid> raster(*ls);
-
-	raster.setGrainSize(particles->size() / 16); //a value of zero disables threading
-	raster.rasterizeSpheres(pls);
-	raster.finalize();
-
-	//size_t test1 = raster.getMinCount();
-	//size_t test2 = raster.getMaxCount();
-
-	ls->setName("FluidSurfaceLevelSet");
-	openvdb::GridPtrVec grids;
-	grids.push_back(ls);
-	std::stringstream ss;
-	ss << "C:/Users/Jian Ru/Documents/CIS563/fluidsolver/CIS563-FluidSolver/vdbfiles/"
-		<< "FluidSurfaceLevelSet_" << frameCount << ".vdb";
-	openvdb::io::File file(ss.str().c_str());
-	file.write(grids);
-	file.close();
-	++frameCount;
-}
+//class VDBParticleList
+//{
+//public:
+//	typedef openvdb::Vec3R  value_type;
+//
+//	std::shared_ptr<std::vector<FS_Particle> > particles;
+//	openvdb::Real radius;
+//
+//	VDBParticleList(std::shared_ptr<std::vector<FS_Particle> > ps, openvdb::Real r)
+//		: particles(ps), radius(r) {}
+//
+//	size_t size() const { return particles->size(); }
+//
+//	void getPos(size_t n, openvdb::Vec3R &pos) const
+//	{
+//		std::vector<FS_Particle> &ps = *particles;
+//		pos.x() = ps[n].position.x;
+//		pos.y() = ps[n].position.y;
+//		pos.z() = ps[n].position.z;
+//	}
+//
+//	void getPosRad(size_t n, openvdb::Vec3R& pos, openvdb::Real& rad) const
+//	{
+//		getPos(n, pos);
+//		rad = radius;
+//	}
+//
+//	void getPosRadVel(size_t n, openvdb::Vec3R& pos, openvdb::Real& rad, openvdb::Vec3R& vel) const
+//	{
+//		getPosRad(n, pos, rad);
+//		std::vector<FS_Particle> &ps = *particles;
+//		vel.x() = ps[n].velocity.x;
+//		vel.y() = ps[n].velocity.y;
+//		vel.z() = ps[n].velocity.z;
+//	}
+//};
+//
+//
+//void FS_MACGrid::buildSDF()
+//{
+//	static int frameCount = 0;
+//
+//	VDBParticleList pls(particles, cellSize * .5f);
+//
+//	const float voxelSize = cellSize * .25f, halfWidth = 6.f;
+//	openvdb::FloatGrid::Ptr ls = openvdb::createLevelSet<openvdb::FloatGrid>(voxelSize, halfWidth);
+//	openvdb::tools::ParticlesToLevelSet<openvdb::FloatGrid> raster(*ls);
+//
+//	raster.setGrainSize(particles->size() / 16); //a value of zero disables threading
+//	raster.rasterizeSpheres(pls);
+//	raster.finalize();
+//
+//	//size_t test1 = raster.getMinCount();
+//	//size_t test2 = raster.getMaxCount();
+//
+//	ls->setName("FluidSurfaceLevelSet");
+//	openvdb::GridPtrVec grids;
+//	grids.push_back(ls);
+//	std::stringstream ss;
+//	ss << "C:/Users/Jian Ru/Documents/CIS563/fluidsolver/CIS563-FluidSolver/vdbfiles/"
+//		<< "FluidSurfaceLevelSet_" << frameCount << ".vdb";
+//	openvdb::io::File file(ss.str().c_str());
+//	file.write(grids);
+//	file.close();
+//	++frameCount;
+//}

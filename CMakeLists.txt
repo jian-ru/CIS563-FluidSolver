@@ -95,7 +95,7 @@ set(CORE_SRC
         src/scene/scene.cpp
         src/geom/box_container.cpp
 		src/geom/box_source.cpp
-		src/geom/grid.cpp
+		src/geom/gpu_grid.cpp
 )
 
 add_executable(Thanda ${CORE_SRC})

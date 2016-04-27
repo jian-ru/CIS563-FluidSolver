@@ -1,3 +1,39 @@
+# Submission 06
+
+IMPORTANT:
+    1. After generating the project using cmake and running it once to generate executable,
+       please copy tbb_debug.dll and Half.dll from nuparu/lib/win into where the executable resides.
+	   
+    2. Libraries used were compiled with VS 14 x64 compiler. They may not work with your compiler
+	   if you are using a different one.
+	   
+	   
+Min OpenGL requirement: 4.3
+Visual Studio requirement: 14 (2015) x64
+
+
+Updates:
+	1. Implemented FLIP using GPU kernels;
+	
+Performance Analysis:
+(20 x 20 x 20 grid):
+    19,200          particles -> 12  FPS
+	153,600         particles -> 8   FPS
+	518,400         particles -> 4   FPS
+	1,228,800       particles -> 2   FPS
+	2,400,000       particles -> 1.2 FPS
+	
+(10^3 grid, 2,400 particles)            -> 45  FPS
+(20^3 grid, 19,200 particles)           -> 12  FPS
+(40^3 grid, 166,400 particles)          -> 4.8 FPS
+(50^3 grid, 320,200 particles)          -> 2.7 FPS
+(80^3 grid, 1,331,200 particles)        -> 0.7 FPS
+
+
+Existing Problems:
+	1. The simulation is unstable. Some local area will explode during the simulation.
+
+	   
 # Submission 05
 
 IMPORTANT:
