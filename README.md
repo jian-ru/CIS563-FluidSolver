@@ -1,3 +1,9 @@
+# Submission 07
+
+Updates:
+	1. Fixed bugs. Now the simulation won't explode.
+
+
 # Submission 06
 
 IMPORTANT:

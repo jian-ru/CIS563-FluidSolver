@@ -102,41 +102,32 @@ void get_ijk(in int flatIdx, out ivec3 ijk)
 
 float computeWeightU(in vec3 pos, in vec3 cxyz)
 {
-	float delta = 0.5 * cellSize;
-	float ux = pos.x;
-	float uy = pos.y - delta;
-	float uz = pos.z - delta;
-	float wu = 1.0 - abs(ux - cxyz.x) / cellSize;
-	float wv = 1.0 - abs(uy - cxyz.y) / cellSize;
-	float ww = 1.0 - abs(uz - cxyz.z) / cellSize;
+	const float delta = 0.5 * cellSize;
 	
-	return wu * wv * ww;
+	vec3 offPos = vec3(pos.x, pos.y - delta, pos.z - delta);
+	vec3 wuvw = clamp(1.0 - abs(offPos - cxyz) / cellSize, 0.0, 1.0);
+	
+	return wuvw.x * wuvw.y * wuvw.z;
 }
 
 float computeWeightV(in vec3 pos, in vec3 cxyz)
 {
-	float delta = 0.5 * cellSize;
-	float vx = pos.x - delta;
-	float vy = pos.y;
-	float vz = pos.z - delta;
-	float wu = 1.0 - abs(vx - cxyz.x) / cellSize;
-	float wv = 1.0 - abs(vy - cxyz.y) / cellSize;
-	float ww = 1.0 - abs(vz - cxyz.z) / cellSize;
+	const float delta = 0.5 * cellSize;
 	
-	return wu * wv * ww;
+	vec3 offPos = vec3(pos.x - delta, pos.y, pos.z - delta);
+	vec3 wuvw = clamp(1.0 - abs(offPos - cxyz) / cellSize, 0.0, 1.0);
+	
+	return wuvw.x * wuvw.y * wuvw.z;
 }
 
 float computeWeightW(in vec3 pos, in vec3 cxyz)
 {
-	float delta = 0.5 * cellSize;
-	float wx = pos.x - delta;
-	float wy = pos.y - delta;
-	float wz = pos.z;
-	float wu = 1.0 - abs(wx - cxyz.x) / cellSize;
-	float wv = 1.0 - abs(wy - cxyz.y) / cellSize;
-	float ww = 1.0 - abs(wz - cxyz.z) / cellSize;
+	const float delta = 0.5 * cellSize;
 	
-	return wu * wv * ww;
+	vec3 offPos = vec3(pos.x - delta, pos.y - delta, pos.z);
+	vec3 wuvw = clamp(1.0 - abs(offPos - cxyz) / cellSize, 0.0, 1.0);
+	
+	return wuvw.x * wuvw.y * wuvw.z;
 }
 
 

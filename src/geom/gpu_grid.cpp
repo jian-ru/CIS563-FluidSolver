@@ -401,7 +401,7 @@ void FS_GPU_MACGRID::seedParticles()
 {
 	const int numSamples2D = numSamples1D * numSamples1D;
 	const int numSamples3D = numSamples2D * numSamples1D;
-	const int xExtent = (xcount - 2) / 3;
+	const int xExtent = (xcount - 2) / 4;
 	const int yExtent = (ycount - 2);
 	const int zExtent = (zcount - 2);
 	const int xStart = 1; // 0 is boundary. Do not spawn into boundary cells
@@ -935,6 +935,7 @@ void FS_GPU_MACGRID::pressureSolve()
 	// build diagA, one_diagA, offDiagA, offsetsSizesBuffer, colNums, and b
 	buildPressureSolveLinearSystem();
 
+	// CPU build linear system
 	//auto flatIdx = [this](int i, int j, int k) -> int
 	//{
 	//	return i * (ycount * zcount) + j * zcount + k;
@@ -1244,10 +1245,10 @@ void FS_GPU_MACGRID::pressureSolve()
 	//Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Eigen::Lower, Eigen::IncompleteCholesky<double> > cg(A);
 	//resPressure = cg.solve(cpuB);
 
-	//std::vector<float> resP;
+	//std::vector<float> xCPU;
 	//for (int i = 0; i < numFluidCells_CPU; ++i)
 	//{
-	//	resP.push_back(resPressure(i));
+	//	xCPU.push_back(resPressure(i));
 	//}
 
 	//std::vector<float> xCPU(numFluidCells_CPU);

@@ -22,10 +22,10 @@ std::shared_ptr<FS_Scene> FS_Scene::createFS_Scene(std::ifstream &jsonStream)
 	}
 
 	// Container
-	const float cellSize = .25f;
+	const float cellSize = .125f;
 	float c_scaleX = newScene->sceneDesc["containerDim"]["scaleX"].asFloat();
-	float c_scaleY = newScene->sceneDesc["containerDim"]["scaleX"].asFloat();
-	float c_scaleZ = newScene->sceneDesc["containerDim"]["scaleX"].asFloat();
+	float c_scaleY = newScene->sceneDesc["containerDim"]["scaleY"].asFloat();
+	float c_scaleZ = newScene->sceneDesc["containerDim"]["scaleZ"].asFloat();
 	int xcount = ceil(c_scaleX / cellSize);
 	int ycount = ceil(c_scaleY / cellSize);
 	int zcount = ceil(c_scaleZ / cellSize);

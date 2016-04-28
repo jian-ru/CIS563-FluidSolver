@@ -395,7 +395,7 @@ int main()
 				pScene->gpu_grid->ycount * pScene->gpu_grid->cellSize * .5f,
 				pScene->gpu_grid->zcount * pScene->gpu_grid->cellSize * .5f
 			);
-	glm::vec3 camPos = gridCenter + glm::vec3(0.f, 0.f, gridCenter.z * 4.f);
+	glm::vec3 camPos = gridCenter + glm::vec3(0.f, 0.f, gridCenter.z * 5.f);
 
 	pCam = FS_Camera::createFS_Camera(WINDOW_WIDTH, WINDOW_HEIGHT, camPos, gridCenter);
 

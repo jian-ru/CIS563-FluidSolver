@@ -94,12 +94,10 @@ void getu_uvw(in vec3 pos, out ivec3 ijk, out vec3 uvw)
 	vec3 offPos;
 	
 	getu_ijk(pos, ijk);
-	cxyz = vec3(float(ijk.x) * cellSize,
-	            float(ijk.y) * cellSize,
-				float(ijk.z) * cellSize);
+	cxyz = vec3(ijk) * cellSize;
 	offPos = vec3(pos.x, pos.y - delta, pos.z - delta);
 	
-	uvw = (offPos - cxyz) / cellSize;
+	uvw = clamp((offPos - cxyz) / cellSize, 0.0, 1.0);
 }
 
 void getv_uvw(in vec3 pos, out ivec3 ijk, out vec3 uvw)
@@ -109,12 +107,10 @@ void getv_uvw(in vec3 pos, out ivec3 ijk, out vec3 uvw)
 	vec3 offPos;
 	
 	getv_ijk(pos, ijk);
-	cxyz = vec3(float(ijk.x) * cellSize,
-	            float(ijk.y) * cellSize,
-				float(ijk.z) * cellSize);
+	cxyz = vec3(ijk) * cellSize;
 	offPos = vec3(pos.x - delta, pos.y, pos.z - delta);
 	
-	uvw = (offPos - cxyz) / cellSize;
+	uvw = clamp((offPos - cxyz) / cellSize, 0.0, 1.0);
 }
 
 void getw_uvw(in vec3 pos, out ivec3 ijk, out vec3 uvw)
@@ -124,12 +120,10 @@ void getw_uvw(in vec3 pos, out ivec3 ijk, out vec3 uvw)
 	vec3 offPos;
 	
 	getw_ijk(pos, ijk);
-	cxyz = vec3(float(ijk.x) * cellSize,
-	            float(ijk.y) * cellSize,
-				float(ijk.z) * cellSize);
+	cxyz = vec3(ijk) * cellSize;
 	offPos = vec3(pos.x - delta, pos.y - delta, pos.z);
 	
-	uvw = (offPos - cxyz) / cellSize;
+	uvw = clamp((offPos - cxyz) / cellSize, 0.0, 1.0);
 }
 
 float triLerpU(in vec3 pos, in vec3 oldVel)
