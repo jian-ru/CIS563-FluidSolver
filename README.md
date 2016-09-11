@@ -70,18 +70,19 @@ Updates:
 
 # Submission 04
 
-IMPORTANT:
-    1. After generating the project using cmake and running it once to generate executable,
-       please copy tbb_debug.dll and Half.dll from nuparu/lib/win into where the executable resides.
+**IMPORTANT:**
+
+  1. After generating the project using cmake and running it once to generate executable,
+     please copy tbb_debug.dll and Half.dll from nuparu/lib/win into where the executable resides.
 	   
-    2. Libraries used were compiled with VS 14 x64 compiler. They may not work with your compiler
-	   if you are using a different one.
+  2. Libraries used were compiled with VS 14 x64 compiler. They may not work with your compiler
+     if you are using a different one.
 	   
-	3. Uncomment buildSDF() in FS_Grid::render() to enable writing VDB files.
-	   You may want to change the ouput directory specified in FS_Grid::buildSDF().
+  3. Uncomment buildSDF() in FS_Grid::render() to enable writing VDB files.
+     You may want to change the ouput directory specified in FS_Grid::buildSDF().
 	   
-Min OpenGL requirement: 4.3
-Visual Studio requirement: 14 (2015) x64
+**Min OpenGL requirement:** 4.3
+**Visual Studio requirement:** 14 (2015) x64
 
 **Parallelization Performance Analysis (10 x 10 grid with 8 particles per cell):**
 
