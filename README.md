@@ -62,7 +62,7 @@
 
 **Visual Studio requirement:** 14 (2015) x64
 
-Updates:
+**Updates:**
   1. Implemented Conjugate Gradient method with Diagonal Preconditioning using GPU kernels.
      Current implementation is not optimal due to heavy CPU intervention but it is still
      about 10 times faster than the CPU implementation.
