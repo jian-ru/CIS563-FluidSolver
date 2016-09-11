@@ -48,7 +48,7 @@
 	   
 # Submission 05
 
-IMPORTANT:
+**IMPORTANT:**
   1. After generating the project using cmake and running it once to generate executable,
      please copy tbb_debug.dll and Half.dll from nuparu/lib/win into where the executable resides.
 	   
